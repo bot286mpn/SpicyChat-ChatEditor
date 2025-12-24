@@ -1495,6 +1495,8 @@
     function createTemplatesAccessButton() {
         const oldBtn = document.getElementById('templates-access-btn');
         if (oldBtn) oldBtn.remove();
+        const oldSaveBtn = document.getElementById('quick-save-template-btn');
+        if (oldSaveBtn) oldSaveBtn.remove();
         const inputContainer = document.querySelector('.flex.justify-between.items-end.py-sm.px-1.gap-0');
         if (!inputContainer) {
             setTimeout(createTemplatesAccessButton, 500);
