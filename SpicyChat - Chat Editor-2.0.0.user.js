@@ -591,6 +591,14 @@
             currentProfileName = newName;
         }
 
+        // Update character profile map
+        Object.keys(characterProfileMap).forEach(charId => {
+            if (characterProfileMap[charId] === oldName) {
+                characterProfileMap[charId] = newName;
+            }
+        });
+        saveCharacterProfileMap();
+
         saveProfiles();
         updatePanelUI();
         showToast(`Переименовано в "${newName}"`, 'success');
@@ -2353,7 +2361,17 @@ compactMode ? '14px' : '20px'}; border-bottom:1px solid rgba(255,255,255,0.15); 
             if (currentProfileName === 'Профиль не выбран') {
                 showToast('Выберите профиль для удаления', 'error');
             } else if (confirm('Удалить профиль "' + currentProfileName + '"?')) {
-                delete profiles[currentProfileName];
+                const profileToDelete = currentProfileName;
+                delete profiles[profileToDelete];
+
+                // Update character profile map
+                Object.keys(characterProfileMap).forEach(charId => {
+                    if (characterProfileMap[charId] === profileToDelete) {
+                        delete characterProfileMap[charId];
+                    }
+                });
+                saveCharacterProfileMap();
+
                 currentProfileName = 'Профиль не выбран';
                 currentSettings = {...DEFAULT_SETTINGS};
                 updateProfilesList();
