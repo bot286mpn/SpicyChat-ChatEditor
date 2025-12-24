@@ -33,7 +33,7 @@
     let lastUrl = window.location.href;
     let hideButtonTimeout = null;
     let favoriteFonts = [];
-    let chatTemplates = [];
+    let globalTemplates = [];
     let compactMode = false;
     let modalPositions = {};
 
@@ -109,7 +109,8 @@
         useGradient: false,
         botMsgColor2: '#1f2937',
         userMsgColor2: '#1e40af',
-        gradientAngle: 90
+        gradientAngle: 90,
+        templates: []
     };
 
     function safeEncode(str) { try { return encodeURIComponent(str); } catch (e) { return str; } }
@@ -374,19 +375,47 @@
     }
 
     // === ШАБЛОНЫ / БЫСТРЫЕ ОТВЕТЫ ===
-    function saveChatTemplates() {
-        GM_setValue('spicychat_chat_templates', JSON.stringify(chatTemplates));
+    function saveGlobalTemplates() {
+        GM_setValue('spicychat_global_templates', JSON.stringify(globalTemplates));
     }
 
-    function loadChatTemplates() {
-        const saved = GM_getValue('spicychat_chat_templates', null);
+    function loadGlobalTemplates() {
+        const saved = GM_getValue('spicychat_global_templates', null);
         if (saved) {
-            chatTemplates = JSON.parse(saved);
+            globalTemplates = JSON.parse(saved);
         } else {
-            chatTemplates = [
-                { title: 'Пример действия', content: '*Смотрит на вас с интересом*' },
-                { title: 'Пример OOC', content: '((Я сейчас отойду на пару минут))' }
+            globalTemplates = [
+                { title: 'Пример OOC (общий)', content: '((Я сейчас отойду на пару минут))' }
             ];
+        }
+    }
+
+    function runTemplateMigration() {
+        const migrationDone = GM_getValue('spicychat_template_migration_v2', false);
+        if (migrationDone) return;
+
+        const oldTemplatesRaw = GM_getValue('spicychat_chat_templates', null);
+        if (oldTemplatesRaw) {
+            try {
+                const oldTemplates = JSON.parse(oldTemplatesRaw);
+                const globalTemplatesRaw = GM_getValue('spicychat_global_templates', '[]');
+                let currentGlobalTemplates = JSON.parse(globalTemplatesRaw);
+
+                oldTemplates.forEach(oldTpl => {
+                    if (!currentGlobalTemplates.some(t => t.title === oldTpl.title && t.content === oldTpl.content)) {
+                        currentGlobalTemplates.push(oldTpl);
+                    }
+                });
+
+                GM_setValue('spicychat_global_templates', JSON.stringify(currentGlobalTemplates));
+                GM_setValue('spicychat_template_migration_v2', true);
+                console.log("SpicyChat Editor: Migrated old templates to global storage.");
+                showToast('Шаблоны перенесены в новое хранилище', 'info');
+            } catch (e) {
+                console.error("Template migration failed:", e);
+            }
+        } else {
+            GM_setValue('spicychat_template_migration_v2', true);
         }
     }
 
@@ -1270,8 +1299,15 @@
                     <div style="width: 60%; padding: 16px; display: flex; flex-direction: column; gap: 12px;">
                         <h4 id="template-editor-title" style="margin:0; color:white; font-size: 14px; font-weight:600;">Новый шаблон</h4>
                         <input type="hidden" id="template-edit-index" value="-1">
+                        <input type="hidden" id="template-edit-type" value="global">
                         <input type="text" id="template-title-input" placeholder="Название шаблона" style="width: 100%; padding: 8px; background: #374151; color: white; border: 1px solid #4b5563; border-radius: 4px; font-size: 13px;">
                         <textarea id="template-content-input" placeholder="Текст шаблона..." style="width: 100%; flex: 1; padding: 8px; background: #374151; color: white; border: 1px solid #4b5563; border-radius: 4px; font-size: 13px; resize: vertical;"></textarea>
+
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 8px; background: rgba(255,255,255,0.05); border-radius: 5px;" title="Если включено, шаблон будет виден только в текущем профиле">
+                            <input type="checkbox" id="template-is-profile-specific" style="width: 15px; height: 15px; cursor: pointer;">
+                            <span style="color: white; font-size: 12px; font-weight: 600;">Привязать к текущему профилю</span>
+                        </label>
+
                         <div style="display:flex; gap: 10px;">
                             <button id="save-template-btn" style="flex:1; padding: 9px; background: #10b981; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight:600;">Сохранить</button>
                             <button id="clear-template-form-btn" style="padding: 9px; background: #4b5563; color: white; border: none; border-radius: 5px; cursor: pointer;">Очистить</button>
@@ -1297,81 +1333,145 @@
         if (!container) return;
         container.innerHTML = '';
 
-        chatTemplates.forEach((template, index) => {
-            const item = document.createElement('div');
-            item.style.cssText = `
-                padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,0.05);
-                display: flex; justify-content: space-between; align-items: center; cursor: pointer;
-            `;
-            item.innerHTML = `
-                <div style="color: white; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${template.title}</div>
-                <div style="display:flex; gap: 5px;">
-                    <button class="delete-template-btn" data-index="${index}" title="Удалить" style="background: #ef4444; border:none; color:white; border-radius:4px; width:22px; height:22px; font-size:12px;">🗑️</button>
-                </div>
-            `;
-            item.addEventListener('click', (e) => {
-                if (e.target.classList.contains('delete-template-btn')) return;
-                editTemplate(index);
+        const renderList = (title, templates, type) => {
+            container.innerHTML += `<h5 style="padding: 10px 12px 5px; margin: 5px 0 0; color: #9ca3af; font-size: 11px; font-weight: 600; text-transform: uppercase;">${title}</h5>`;
+            if (templates.length === 0) {
+                container.innerHTML += `<div style="padding: 10px 12px; color: #6b7280; font-size: 12px;">Пусто</div>`;
+                return;
+            }
+
+            templates.forEach((template, index) => {
+                const item = document.createElement('div');
+                item.style.cssText = `
+                    padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,0.05);
+                    display: flex; justify-content: space-between; align-items: center; cursor: pointer;
+                `;
+                item.innerHTML = `
+                    <div style="color: white; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${template.title}">${template.title}</div>
+                    <div style="display:flex; gap: 5px;">
+                        <button class="delete-template-btn" data-index="${index}" data-type="${type}" title="Удалить" style="background: #ef4444; border:none; color:white; border-radius:4px; width:22px; height:22px; font-size:12px;">🗑️</button>
+                    </div>
+                `;
+                item.addEventListener('click', (e) => {
+                    if (e.target.classList.contains('delete-template-btn')) return;
+                    editTemplate(index, type);
+                });
+                item.querySelector('.delete-template-btn').addEventListener('click', () => deleteTemplate(index, type));
+                container.appendChild(item);
             });
-            item.querySelector('.delete-template-btn').addEventListener('click', () => deleteTemplate(index));
-            container.appendChild(item);
-        });
+        };
+
+        renderList('🌐 Общие', globalTemplates, 'global');
+
+        const profileName = currentProfileName !== 'Профиль не выбран' ? `👤 ${currentProfileName}` : '👤 Профиль не выбран';
+        const profileTemplates = (currentProfileName !== 'Профиль не выбран' && currentSettings.templates) ? currentSettings.templates : [];
+        const profileContainer = document.createElement('div');
+        if (currentProfileName === 'Профиль не выбран') {
+            profileContainer.style.opacity = '0.5';
+        }
+        renderList(profileName, profileTemplates, 'profile');
     }
 
     function saveTemplate() {
         const titleInput = document.getElementById('template-title-input');
         const contentInput = document.getElementById('template-content-input');
         const indexInput = document.getElementById('template-edit-index');
+        const typeInput = document.getElementById('template-edit-type');
+        const isProfileSpecificCheckbox = document.getElementById('template-is-profile-specific');
+
         const title = titleInput.value.trim();
         const content = contentInput.value.trim();
         const index = parseInt(indexInput.value);
+        const type = typeInput.value;
+        const isProfileSpecific = isProfileSpecificCheckbox.checked;
 
         if (!title || !content) {
             showToast('Название и текст не могут быть пустыми', 'error');
             return;
         }
 
-        if (index === -1) {
-            chatTemplates.push({ title, content });
-            showToast('Шаблон добавлен', 'success');
-        } else {
-            chatTemplates[index] = { title, content };
+        if (isProfileSpecific && currentProfileName === 'Профиль не выбран') {
+            showToast('Выберите профиль для сохранения', 'error');
+            return;
+        }
+
+        const newTemplate = { title, content };
+
+        if (index === -1) { // Создание нового
+            if (isProfileSpecific) {
+                currentSettings.templates.push(newTemplate);
+                saveProfiles();
+                showToast('Шаблон добавлен в профиль', 'success');
+            } else {
+                globalTemplates.push(newTemplate);
+                saveGlobalTemplates();
+                showToast('Общий шаблон добавлен', 'success');
+            }
+        } else { // Редактирование существующего
+            const targetArray = type === 'profile' ? currentSettings.templates : globalTemplates;
+            targetArray[index] = newTemplate;
+
+            if (type === 'profile') {
+                saveProfiles();
+            } else {
+                saveGlobalTemplates();
+            }
             showToast('Шаблон обновлен', 'success');
         }
 
-        saveChatTemplates();
         renderTemplatesList();
         clearTemplateForm();
         const popup = document.getElementById('templates-popup');
-        if(popup) popup.remove();
+        if (popup) popup.remove();
     }
 
-    function editTemplate(index) {
-        const template = chatTemplates[index];
+    function editTemplate(index, type) {
+        const checkbox = document.getElementById('template-is-profile-specific');
+        const targetArray = type === 'profile' ? currentSettings.templates : globalTemplates;
+        const template = targetArray[index];
+
         if (!template) return;
+
         document.getElementById('template-editor-title').textContent = 'Редактирование';
         document.getElementById('template-edit-index').value = index;
+        document.getElementById('template-edit-type').value = type;
         document.getElementById('template-title-input').value = template.title;
         document.getElementById('template-content-input').value = template.content;
+
+        checkbox.checked = type === 'profile';
+        checkbox.disabled = true; // Запрещаем менять тип при редактировании
     }
 
-    function deleteTemplate(index) {
-        if (confirm(`Удалить шаблон "${chatTemplates[index].title}"?`)) {
-            chatTemplates.splice(index, 1);
-            saveChatTemplates();
+    function deleteTemplate(index, type) {
+        const targetArray = type === 'profile' ? currentSettings.templates : globalTemplates;
+        if (!targetArray || !targetArray[index]) return;
+
+        if (confirm(`Удалить шаблон "${targetArray[index].title}"?`)) {
+            targetArray.splice(index, 1);
+
+            if (type === 'profile') {
+                saveProfiles();
+            } else {
+                saveGlobalTemplates();
+            }
+
             renderTemplatesList();
             clearTemplateForm();
             showToast('Шаблон удален', 'success');
             const popup = document.getElementById('templates-popup');
-            if(popup) popup.remove();
+            if (popup) popup.remove();
         }
     }
 
     function clearTemplateForm() {
         document.getElementById('template-editor-title').textContent = 'Новый шаблон';
         document.getElementById('template-edit-index').value = -1;
+        document.getElementById('template-edit-type').value = 'global';
         document.getElementById('template-title-input').value = '';
         document.getElementById('template-content-input').value = '';
+        const checkbox = document.getElementById('template-is-profile-specific');
+        checkbox.checked = false;
+        checkbox.disabled = false;
     }
 
     function uploadImageToCatbox(file, callback) {
@@ -1409,7 +1509,21 @@
             e.stopPropagation();
             toggleTemplatesPopup(button);
         });
+
+        const saveButton = document.createElement('button');
+        saveButton.id = 'quick-save-template-btn';
+        saveButton.innerHTML = '💾';
+        saveButton.title = 'Сохранить как шаблон';
+        saveButton.style.cssText = `background: #10b981; color: white; border: none; border-radius: 5px; width: 36px; height: 36px; cursor: pointer; font-size: 16px; margin-left: 5px;`;
+        saveButton.addEventListener('click', () => {
+             const textarea = document.querySelector('textarea[placeholder*="Напишите сообщение"]');
+             if (textarea) {
+                openQuickSaveModal(textarea.value);
+             }
+        });
+
         inputContainer.appendChild(button);
+        inputContainer.appendChild(saveButton);
     }
 
     function toggleTemplatesPopup(button) {
@@ -1422,36 +1536,168 @@
         popup.id = 'templates-popup';
         popup.style.cssText = `position: absolute; bottom: 50px; right: 10px; width: 250px; max-height: 300px; overflow-y: auto; background: #2d3748; border: 1px solid #4a5568; border-radius: 8px; z-index: 10001; box-shadow: 0 10px 30px rgba(0,0,0,0.4);`;
 
-        if (chatTemplates.length === 0) {
-            popup.innerHTML = `<div style="padding: 12px; text-align: center; color: #9ca3af; font-size: 13px;">Нет шаблонов.</div>`;
-        } else {
-            chatTemplates.forEach(template => {
-                const item = document.createElement('div');
-                item.textContent = template.title;
-                item.title = template.content;
-                item.style.cssText = `padding: 10px 12px; color: white; font-size: 13px; cursor: pointer; border-bottom: 1px solid #4a5568;`;
-                item.addEventListener('mouseenter', () => item.style.backgroundColor = '#4a5568');
-                item.addEventListener('mouseleave', () => item.style.backgroundColor = 'transparent');
-                item.addEventListener('click', () => {
-                    const textarea = document.querySelector('textarea[placeholder*="Напишите сообщение"]');
-                    if (textarea) {
-                        textarea.value += template.content;
-                        textarea.dispatchEvent(new Event('input', { bubbles: true }));
-                        textarea.focus();
-                    }
-                    popup.remove();
-                });
-                popup.appendChild(item);
+        const createTemplateItem = (template) => {
+            const item = document.createElement('div');
+            item.textContent = template.title;
+            item.title = template.content;
+            item.style.cssText = `padding: 10px 12px; color: white; font-size: 13px; cursor: pointer; border-bottom: 1px solid #4a5568;`;
+            item.addEventListener('mouseenter', () => item.style.backgroundColor = '#4a5568');
+            item.addEventListener('mouseleave', () => item.style.backgroundColor = 'transparent');
+            item.addEventListener('click', () => {
+                const textarea = document.querySelector('textarea[placeholder*="Напишите сообщение"]');
+                if (textarea) {
+                    textarea.value += template.content;
+                    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+                    textarea.focus();
+                }
+                popup.remove();
             });
+            return item;
+        };
+
+        const addSection = (title, templates) => {
+            popup.innerHTML += `<h5 style="padding: 8px 12px 4px; margin: 0; color: #9ca3af; font-size: 11px; font-weight: 600; text-transform: uppercase; background: #1f2937;">${title}</h5>`;
+            if (templates.length === 0) {
+                popup.innerHTML += `<div style="padding: 10px 12px; color: #6b7280; font-size: 12px;">Пусто</div>`;
+            } else {
+                templates.forEach(template => popup.appendChild(createTemplateItem(template)));
+            }
+        };
+
+        const profileTemplates = (currentProfileName !== 'Профиль не выбран' && currentSettings.templates) ? currentSettings.templates : [];
+
+        if (globalTemplates.length === 0 && profileTemplates.length === 0) {
+             popup.innerHTML = `<div style="padding: 12px; text-align: center; color: #9ca3af; font-size: 13px;">Нет шаблонов.</div>`;
+        } else {
+            addSection('🌐 Общие', globalTemplates);
+            if (currentProfileName !== 'Профиль не выбран') {
+                 addSection(`👤 ${currentProfileName}`, profileTemplates);
+            }
         }
+
         document.body.appendChild(popup);
         const closePopup = (e) => {
-            if (!popup.contains(e.target)) {
+            if (!popup.contains(e.target) && e.target.id !== 'templates-access-btn') {
                 popup.remove();
                 document.removeEventListener('click', closePopup);
             }
         };
         setTimeout(() => document.addEventListener('click', closePopup), 0);
+    }
+
+    // === БЫСТРОЕ СОХРАНЕНИЕ ШАБЛОНА ===
+    function openQuickSaveModal(content) {
+        if (!content || content.trim() === '') {
+            showToast('Нечего сохранять', 'info');
+            return;
+        }
+
+        let modal = document.getElementById('quick-save-modal');
+        if (modal) modal.remove();
+
+        modal = document.createElement('div');
+        modal.id = 'quick-save-modal';
+        modal.style.cssText = `
+            position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            z-index: 10003; font-family: 'Inter', sans-serif;
+        `;
+
+        const defaultTitle = content.substring(0, 30).replace(/\n/g, ' ') + (content.length > 30 ? '...' : '');
+
+        modal.innerHTML = `
+            <div style="background: #2d3748; padding: 20px; border-radius: 10px; width: 400px; color: white; box-shadow: 0 20px 60px rgba(0,0,0,0.5);">
+                <h3 style="margin-top:0; text-align:center;">Быстрое сохранение шаблона</h3>
+                <input type="text" id="quick-save-title" value="${defaultTitle}" style="width: 100%; padding: 8px; margin: 10px 0; border-radius: 5px; background: #1a202c; color: white; border:1px solid #4a5568;" placeholder="Название шаблона">
+                <textarea id="quick-save-content" readonly style="width: 100%; height: 100px; padding: 8px; margin-bottom: 10px; border-radius: 5px; background: #1a202c; color: #9ca3af; border:1px solid #4a5568; resize: none;">${content}</textarea>
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 8px; background: rgba(255,255,255,0.05); border-radius: 5px; margin-bottom: 15px;" title="Если включено, шаблон будет виден только в текущем профиле">
+                    <input type="checkbox" id="quick-save-is-profile" style="width: 15px; height: 15px; cursor: pointer;">
+                    <span style="color: white; font-size: 12px; font-weight: 600;">Привязать к текущему профилю</span>
+                </label>
+                <div style="display: flex; gap: 10px;">
+                    <button id="quick-save-btn" style="flex:1; padding: 8px; background: #10b981; color: white; border: none; border-radius: 5px; cursor: pointer;">Сохранить</button>
+                    <button id="quick-cancel-btn" style="flex:1; padding: 8px; background: #4a5568; color: white; border: none; border-radius: 5px; cursor: pointer;">Отмена</button>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(modal);
+
+        const isProfileSelected = currentProfileName !== 'Профиль не выбран';
+        const checkbox = modal.querySelector('#quick-save-is-profile');
+        if (!isProfileSelected) {
+            checkbox.disabled = true;
+            checkbox.parentElement.style.opacity = '0.5';
+            checkbox.parentElement.title = 'Выберите профиль для использования этой опции';
+        }
+
+        modal.querySelector('#quick-cancel-btn').onclick = () => modal.remove();
+        modal.querySelector('#quick-save-btn').onclick = () => {
+            const title = modal.querySelector('#quick-save-title').value.trim();
+            const isProfileSpecific = checkbox.checked;
+
+            if (!title) {
+                showToast('Название не может быть пустым', 'error');
+                return;
+            }
+
+            const newTemplate = { title, content };
+
+            if (isProfileSpecific) {
+                currentSettings.templates.push(newTemplate);
+                saveProfiles();
+                showToast(`Шаблон "${title}" сохранен в профиль`, 'success');
+            } else {
+                globalTemplates.push(newTemplate);
+                saveGlobalTemplates();
+                showToast(`Общий шаблон "${title}" сохранен`, 'success');
+            }
+
+            if (document.getElementById('templates-modal')?.style.display === 'flex') {
+                renderTemplatesList();
+            }
+            const popup = document.getElementById('templates-popup');
+            if(popup) popup.remove();
+
+            modal.remove();
+        };
+    }
+
+    function addSaveTemplateButtonsToMessages() {
+        const messages = document.querySelectorAll('div.w-full.flex.mb-lg .leading-6');
+        messages.forEach(msgContent => {
+            const parentBubble = msgContent.parentElement;
+            if (!parentBubble || parentBubble.querySelector('.quick-save-from-chat-btn')) {
+                return; // Already has a button or can't find parent
+            }
+
+            if (getComputedStyle(parentBubble).position === 'static') {
+                parentBubble.style.position = 'relative';
+            }
+
+            const saveBtn = document.createElement('button');
+            saveBtn.innerHTML = '💾';
+            saveBtn.title = 'Сохранить как шаблон';
+            saveBtn.className = 'quick-save-from-chat-btn';
+            saveBtn.style.cssText = `
+                position: absolute; top: 5px; right: 5px;
+                background: rgba(16, 185, 129, 0.8); color: white; border: none;
+                border-radius: 5px; width: 28px; height: 28px;
+                cursor: pointer; font-size: 14px; opacity: 0;
+                transition: opacity 0.2s; z-index: 10;
+            `;
+
+            parentBubble.addEventListener('mouseenter', () => saveBtn.style.opacity = '1');
+            parentBubble.addEventListener('mouseleave', () => saveBtn.style.opacity = '0');
+
+            saveBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const clone = msgContent.cloneNode(true);
+                clone.querySelectorAll('.quick-save-from-chat-btn').forEach(el => el.remove());
+                const textToSave = clone.innerText.trim();
+                openQuickSaveModal(textToSave);
+            });
+            parentBubble.appendChild(saveBtn);
+        });
     }
 
     function applyStyles() {
@@ -2066,9 +2312,10 @@ compactMode ? '14px' : '20px'}; border-bottom:1px solid rgba(255,255,255,0.15); 
     }
 
     function init() {
+        runTemplateMigration();
         loadProfiles();
         loadFavoriteFonts();
-        loadChatTemplates();
+        loadGlobalTemplates();
         loadModalPositions();
 
         compactMode = GM_getValue('spicychat_compact_mode', false);
@@ -2099,8 +2346,10 @@ compactMode ? '14px' : '20px'}; border-bottom:1px solid rgba(255,255,255,0.15); 
                     createTemplatesAccessButton();
                 }
             }
+            addSaveTemplateButtonsToMessages();
         });
         observer.observe(document.body, { childList: true, subtree: true });
+        addSaveTemplateButtonsToMessages();
     }
 
     if (document.readyState === 'loading') {
