@@ -211,6 +211,141 @@
         }
     }
 
+    function openMoveTemplateModal(itemId, itemType) {
+        let modal = document.getElementById('move-template-modal');
+        if (modal) modal.remove();
+
+        modal = document.createElement('div');
+        modal.id = 'move-template-modal';
+        modal.style.cssText = `
+            position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            z-index: 10004; font-family: 'Inter', sans-serif;
+        `;
+
+        modal.innerHTML = `
+            <div style="background: #2d3748; padding: 20px; border-radius: 10px; width: 400px; color: white; box-shadow: 0 20px 60px rgba(0,0,0,0.5);">
+                <h3 style="margin-top:0; text-align:center;">Переместить элемент</h3>
+                <select id="move-target-select" style="width: 100%; padding: 8px; margin: 10px 0; border-radius: 5px; background: #1a202c; color: white; border:1px solid #4a5568;"></select>
+                <div style="display: flex; gap: 10px; margin-top: 15px;">
+                    <button id="move-confirm-btn" style="flex:1; padding: 8px; background: #10b981; color: white; border: none; border-radius: 5px; cursor: pointer;">Переместить</button>
+                    <button id="move-cancel-btn" style="flex:1; padding: 8px; background: #4a5568; color: white; border: none; border-radius: 5px; cursor: pointer;">Отмена</button>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(modal);
+
+        const select = modal.querySelector('#move-target-select');
+
+        const optgroupGlobal = document.createElement('optgroup');
+        optgroupGlobal.label = '🌐 Общие';
+        const rootGlobal = document.createElement('option');
+        rootGlobal.value = 'global-root';
+        rootGlobal.textContent = 'Корневая папка';
+        optgroupGlobal.appendChild(rootGlobal);
+        select.appendChild(optgroupGlobal);
+
+        function findFolders(nodes, prefix = '', parentGroup) {
+            nodes.forEach(node => {
+                if (node.type === 'folder') {
+                    const option = document.createElement('option');
+                    option.value = node.id;
+                    option.textContent = prefix + node.title;
+                    parentGroup.appendChild(option);
+                    if (node.children) {
+                        findFolders(node.children, prefix + '-- ', parentGroup);
+                    }
+                }
+            });
+        }
+
+        findFolders(globalTemplates, '', optgroupGlobal);
+
+        if (currentProfileName !== 'Профиль не выбран') {
+            const optgroupProfile = document.createElement('optgroup');
+            optgroupProfile.label = `👤 ${currentProfileName}`;
+            const rootProfile = document.createElement('option');
+            rootProfile.value = 'profile-root';
+            rootProfile.textContent = 'Корневая папка';
+            optgroupProfile.appendChild(rootProfile);
+            select.appendChild(optgroupProfile);
+            findFolders(currentSettings.templates || [], '', optgroupProfile);
+        }
+
+        modal.querySelector('#move-cancel-btn').onclick = () => modal.remove();
+        modal.querySelector('#move-confirm-btn').onclick = () => {
+            moveTemplate(itemId, itemType, select.value);
+            modal.remove();
+        };
+    }
+
+    function moveTemplate(itemId, fromType, toId) {
+        const fromArray = fromType === 'profile' ? currentSettings.templates : globalTemplates;
+        let itemToMove = null;
+        let originalParent = null;
+
+        function findAndExtract(nodes, parent) {
+            for (let i = 0; i < nodes.length; i++) {
+                if (nodes[i].id === itemId) {
+                    itemToMove = nodes.splice(i, 1)[0];
+                    originalParent = parent;
+                    return;
+                }
+                if (nodes[i].children) {
+                    findAndExtract(nodes[i].children, nodes[i]);
+                    if (itemToMove) return;
+                }
+            }
+        }
+
+        findAndExtract(fromArray, null);
+
+        if (!itemToMove) {
+            showToast('Элемент для перемещения не найден', 'error');
+            return;
+        }
+
+        let toArray;
+        let toParent = null;
+
+        if (toId === 'global-root') {
+            toArray = globalTemplates;
+        } else if (toId === 'profile-root') {
+            toArray = currentSettings.templates;
+        } else {
+            function findTarget(nodes) {
+                for (const node of nodes) {
+                    if (node.id === toId && node.type === 'folder') return node;
+                    if (node.children) {
+                        const found = findTarget(node.children);
+                        if (found) return found;
+                    }
+                }
+                return null;
+            }
+            toParent = findTarget(globalTemplates) || findTarget(currentSettings.templates || []);
+            if (toParent) {
+                toArray = toParent.children;
+            }
+        }
+
+        if (toArray) {
+            toArray.push(itemToMove);
+            saveProfiles();
+            saveGlobalTemplates();
+            renderTemplatesList();
+            showToast('Элемент перемещен', 'success');
+        } else {
+            // Rollback
+            if (originalParent) {
+                originalParent.children.push(itemToMove);
+            } else {
+                fromArray.push(itemToMove);
+            }
+            showToast('Не удалось найти целевую папку', 'error');
+        }
+    }
+
     function saveModalPositions() {
         GM_setValue('spicychat_modal_positions', JSON.stringify(modalPositions));
     }
@@ -1366,6 +1501,8 @@
                         <input type="text" id="template-title-input" placeholder="Название шаблона" style="width: 100%; padding: 8px; background: #374151; color: white; border: 1px solid #4b5563; border-radius: 4px; font-size: 13px;">
                         <textarea id="template-content-input" placeholder="Текст шаблона..." style="width: 100%; flex: 1; padding: 8px; background: #374151; color: white; border: 1px solid #4b5563; border-radius: 4px; font-size: 13px; resize: vertical;"></textarea>
 
+                        <select id="template-folder-select" style="width: 100%; padding: 8px; margin-top: 12px; background: #374151; color: white; border: 1px solid #4b5563; border-radius: 4px; font-size: 12px;"></select>
+
                         <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 8px; background: rgba(255,255,255,0.05); border-radius: 5px;" title="Если включено, шаблон будет виден только в текущем профиле">
                             <input type="checkbox" id="template-is-profile-specific" style="width: 15px; height: 15px; cursor: pointer;">
                             <span style="color: white; font-size: 12px; font-weight: 600;">Привязать к текущему профилю</span>
@@ -1393,7 +1530,35 @@
         });
         modal.querySelector('#add-folder-btn').addEventListener('click', createNewFolder);
 
+        modal.querySelector('#template-is-profile-specific').addEventListener('change', updateFolderSelector);
+
+
         renderTemplatesList();
+        updateFolderSelector();
+    }
+
+    function updateFolderSelector() {
+        const select = document.getElementById('template-folder-select');
+        const isProfileSpecific = document.getElementById('template-is-profile-specific').checked;
+        const templates = isProfileSpecific ? (currentSettings.templates || []) : globalTemplates;
+
+        select.innerHTML = '<option value="-1">-- Корневая папка --</option>';
+
+        function findFolders(nodes, prefix = '') {
+            nodes.forEach(node => {
+                if (node.type === 'folder') {
+                    const option = document.createElement('option');
+                    option.value = node.id;
+                    option.textContent = prefix + node.title;
+                    select.appendChild(option);
+                    if (node.children) {
+                        findFolders(node.children, prefix + '-- ');
+                    }
+                }
+            });
+        }
+
+        findFolders(templates);
     }
 
     function createNewFolder() {
@@ -1488,14 +1653,16 @@
                 item.innerHTML = `
                     <div style="color: white; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${node.title}">📝 ${node.title}</div>
                     <div style="display:flex; gap: 5px;">
+                        <button class="move-template-btn" title="Переместить" style="background: #3b82f6; border:none; color:white; border-radius:4px; width:22px; height:22px; font-size:12px;">↔️</button>
                         <button class="delete-template-btn" title="Удалить" style="background: #ef4444; border:none; color:white; border-radius:4px; width:22px; height:22px; font-size:12px;">🗑️</button>
                     </div>
                 `;
                 item.addEventListener('click', (e) => {
-                    if (e.target.classList.contains('delete-template-btn')) return;
+                    if (e.target.classList.contains('delete-template-btn') || e.target.classList.contains('move-template-btn')) return;
                     editTemplate(node.id, type);
                 });
                 item.querySelector('.delete-template-btn').addEventListener('click', () => deleteTemplate(node.id, type));
+                item.querySelector('.move-template-btn').addEventListener('click', () => openMoveTemplateModal(node.id, type));
                 parentContainer.appendChild(item);
             }
         };
@@ -1534,13 +1701,15 @@
     function saveTemplate() {
         const titleInput = document.getElementById('template-title-input');
         const contentInput = document.getElementById('template-content-input');
-        const idInput = document.getElementById('template-edit-index'); // Reusing this for ID
+        const idInput = document.getElementById('template-edit-index');
         const isProfileSpecificCheckbox = document.getElementById('template-is-profile-specific');
+        const folderSelect = document.getElementById('template-folder-select');
 
         const title = titleInput.value.trim();
         const content = contentInput.value.trim();
         const id = idInput.value;
         const isProfileSpecific = isProfileSpecificCheckbox.checked;
+        const folderId = folderSelect.value;
 
         if (!title || !content) {
             showToast('Название и текст не могут быть пустыми', 'error');
@@ -1555,12 +1724,34 @@
         const newTemplate = { id: id !== '-1' ? id : generateId(), type: 'template', title, content };
 
         if (id === '-1') { // Creating new
+            const targetArray = isProfileSpecific ? currentSettings.templates : globalTemplates;
+            let parentFolder = null;
+
+            function findFolder(nodes, fId) {
+                for (const node of nodes) {
+                    if (node.id === fId && node.type === 'folder') return node;
+                    if (node.children) {
+                        const found = findFolder(node.children, fId);
+                        if (found) return found;
+                    }
+                }
+                return null;
+            }
+
+            if (folderId !== '-1') {
+                parentFolder = findFolder(targetArray, folderId);
+            }
+
+            if (parentFolder) {
+                parentFolder.children.push(newTemplate);
+            } else {
+                targetArray.push(newTemplate);
+            }
+
             if (isProfileSpecific) {
-                currentSettings.templates.push(newTemplate);
                 saveProfiles();
                 showToast('Шаблон добавлен в профиль', 'success');
             } else {
-                globalTemplates.push(newTemplate);
                 saveGlobalTemplates();
                 showToast('Общий шаблон добавлен', 'success');
             }
@@ -1720,7 +1911,7 @@
                 item.addEventListener('mouseenter', () => item.style.backgroundColor = '#4a5568');
                 item.addEventListener('mouseleave', () => item.style.backgroundColor = 'transparent');
                 item.addEventListener('click', () => {
-                    const textarea = document.querySelector('textarea[placeholder*="Напишите сообщение"]');
+                    const textarea = document.querySelector('textarea[data-testid="chat-input-textarea"]');
                     if (textarea) {
                         textarea.value += node.content;
                         textarea.dispatchEvent(new Event('input', { bubbles: true }));
@@ -2321,22 +2512,6 @@ compactMode ? '14px' : '20px'}; border-bottom:1px solid rgba(255,255,255,0.15); 
                 saveProfiles();
                 showToast('Профиль обновлён: ' + currentProfileName, 'success');
             }
-        });
-
-        panel.querySelector('#btn-bind-profile').addEventListener('click', () => {
-            const charId = getCharacterId();
-            if (!charId) {
-                showToast('Персонаж не найден', 'error');
-                return;
-            }
-            if (currentProfileName === 'Профиль не выбран') {
-                delete characterProfileMap[charId];
-                showToast('Привязка к профилю снята', 'info');
-            } else {
-                characterProfileMap[charId] = currentProfileName;
-                showToast(`Профиль "${currentProfileName}" привязан к этому персонажу`, 'success');
-            }
-            saveCharacterProfileMap();
         });
 
         panel.querySelector('#btn-duplicate-profile').addEventListener('click', () => {
