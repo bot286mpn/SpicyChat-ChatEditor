@@ -115,6 +115,14 @@
         templates: []
     };
 
+    function mergeWithDefaults(profile) {
+        const newProfile = { ...DEFAULT_SETTINGS, ...profile };
+        if (!newProfile.templates || !Array.isArray(newProfile.templates)) {
+            newProfile.templates = [];
+        }
+        return newProfile;
+    }
+
     function safeEncode(str) { try { return encodeURIComponent(str); } catch (e) { return str; } }
     function safeDecode(str) { try { return decodeURIComponent(str); } catch (e) { return str; } }
     function hexToRgb(hex) {
@@ -156,6 +164,9 @@
             from { transform: translateX(0); opacity: 1; }
             to { transform: translateX(400px); opacity: 0; }
         }
+    .templates-popup-folder-container:hover > .templates-popup-submenu {
+        display: block !important;
+    }
     `);
 
     // === MODAL DRAGGABLE ===
@@ -640,7 +651,7 @@
                     }
 
                     Object.keys(data.profiles).forEach(key => {
-                        profiles[key] = data.profiles[key];
+                        profiles[key] = mergeWithDefaults(data.profiles[key]);
                     });
 
                     if (data.favoriteFonts) {
@@ -699,7 +710,7 @@
             counter++;
         }
 
-        profiles[newName] = { ...profiles[profileName] };
+        profiles[newName] = mergeWithDefaults({ ...profiles[profileName] });
         saveProfiles();
         updatePanelUI();
         showToast(`Создан "${newName}"`, 'success');
@@ -1563,18 +1574,37 @@
 
     function createNewFolder() {
         const folderName = prompt("Введите название папки:");
-        if (folderName && folderName.trim() !== '') {
-            const newFolder = {
-                id: generateId(),
-                type: 'folder',
-                title: folderName.trim(),
-                children: []
-            };
-            globalTemplates.push(newFolder); // Add to global templates by default for now
+        if (!folderName || folderName.trim() === '') return;
+
+        const isProfileSpecific = document.getElementById('template-is-profile-specific')?.checked;
+
+        if (isProfileSpecific && currentProfileName === 'Профиль не выбран') {
+            showToast('Выберите профиль для создания папки', 'error');
+            return;
+        }
+
+        const newFolder = {
+            id: generateId(),
+            type: 'folder',
+            title: folderName.trim(),
+            children: []
+        };
+
+        if (isProfileSpecific) {
+            if (!currentSettings.templates) {
+                currentSettings.templates = [];
+            }
+            currentSettings.templates.push(newFolder);
+            saveProfiles();
+            showToast(`Папка "${folderName}" создана в профиле`, 'success');
+        } else {
+            globalTemplates.push(newFolder);
             saveGlobalTemplates();
-            renderTemplatesList();
             showToast(`Папка "${folderName}" создана`, 'success');
         }
+
+        renderTemplatesList();
+        updateFolderSelector();
     }
 
 
@@ -1882,7 +1912,7 @@
         button.id = 'templates-access-btn';
         button.innerHTML = '📋';
         button.title = 'Быстрые ответы';
-        button.style.cssText = `background: #4b5563; color: white; border: none; border-radius: 5px; width: 36px; height: 36px; cursor: pointer; font-size: 16px; margin-left: 5px;`;
+        button.style.cssText = `background: #4b5563; color: white; border: none; border-radius: 50%; width: 36px; height: 36px; cursor: pointer; font-size: 16px; margin-left: 5px; display: flex; align-items: center; justify-content: center;`;
         button.addEventListener('click', (e) => {
             e.stopPropagation();
             toggleTemplatesPopup(button);
@@ -1901,33 +1931,57 @@
         popup.id = 'templates-popup';
         popup.style.cssText = `position: absolute; bottom: 50px; right: 10px; width: 250px; max-height: 300px; overflow-y: auto; background: #2d3748; border: 1px solid #4a5568; border-radius: 8px; z-index: 10001; box-shadow: 0 10px 30px rgba(0,0,0,0.4);`;
 
-        const createItem = (node, level = 0) => {
+        const createItem = (node, isSubmenu = false) => {
             const item = document.createElement('div');
-            const paddingLeft = 12 + level * 15;
+            item.style.cssText = `padding: 10px 12px; color: white; font-size: 13px; cursor: pointer; border-bottom: 1px solid #4a5568;`;
+
             if (node.type === 'template') {
                 item.textContent = node.title;
                 item.title = node.content;
-                item.style.cssText = `padding: 10px 12px 10px ${paddingLeft}px; color: white; font-size: 13px; cursor: pointer; border-bottom: 1px solid #4a5568;`;
                 item.addEventListener('mouseenter', () => item.style.backgroundColor = '#4a5568');
                 item.addEventListener('mouseleave', () => item.style.backgroundColor = 'transparent');
                 item.addEventListener('click', () => {
-                    const textarea = document.querySelector('textarea[data-testid="chat-input-textarea"]');
+                    const buttonContainer = document.querySelector('.flex.justify-between.items-end.py-sm.px-1.gap-0');
+                    if (!buttonContainer) {
+                        showToast('Не удалось найти контейнер поля ввода', 'error');
+                        popup.remove(); return;
+                    }
+                    const textarea = buttonContainer.querySelector('textarea');
                     if (textarea) {
-                        textarea.value += node.content;
+                        const start = textarea.selectionStart;
+                        const end = textarea.selectionEnd;
+                        const text = textarea.value;
+                        const newText = text.substring(0, start) + node.content + text.substring(end);
+                        textarea.value = newText;
+                        textarea.selectionStart = textarea.selectionEnd = start + node.content.length;
                         textarea.dispatchEvent(new Event('input', { bubbles: true }));
                         textarea.focus();
+                    } else {
+                        showToast('Не удалось найти поле ввода', 'error');
                     }
                     popup.remove();
                 });
-                return [item];
             } else if (node.type === 'folder') {
-                const folderItem = document.createElement('div');
-                folderItem.textContent = `📁 ${node.title}`;
-                folderItem.style.cssText = `padding: 8px 12px 8px ${paddingLeft}px; color: #9ca3af; font-size: 12px; font-weight: bold; background: #1f2937;`;
-                const childrenItems = (node.children || []).flatMap(child => createItem(child, level + 1));
-                return [folderItem, ...childrenItems];
+                item.textContent = `📁 ${node.title} ▸`;
+                item.classList.add('templates-popup-folder-container');
+                item.style.position = 'relative';
+
+                const submenu = document.createElement('div');
+                submenu.classList.add('templates-popup-submenu');
+                submenu.style.cssText = `
+                    display: none; position: absolute; left: 100%; top: -1px; width: 250px;
+                    background: #2d3748; border: 1px solid #4a5568; border-radius: 8px;
+                    z-index: 10002; box-shadow: 5px 5px 15px rgba(0,0,0,0.3);
+                `;
+
+                if (node.children && node.children.length > 0) {
+                    node.children.forEach(child => submenu.appendChild(createItem(child, true)));
+                } else {
+                    submenu.innerHTML = `<div style="padding: 10px 12px; color: #6b7280; font-size: 12px;">Пусто</div>`;
+                }
+                item.appendChild(submenu);
             }
-            return [];
+            return item;
         };
 
         const addSection = (title, templates) => {
@@ -1943,7 +1997,9 @@
                 emptyEl.textContent = 'Пусто';
                 sectionWrapper.appendChild(emptyEl);
             } else {
-                templates.flatMap(node => createItem(node)).forEach(item => sectionWrapper.appendChild(item));
+                templates.forEach(node => {
+                    sectionWrapper.appendChild(createItem(node));
+                });
             }
             popup.appendChild(sectionWrapper);
         };
@@ -2309,14 +2365,15 @@
     }
 
     function generateExportHTML() {
-        let messages = document.querySelectorAll('div.w-full.flex.mb-lg');
-        if (messages.length === 0) messages = document.querySelectorAll('.flex.flex-col.gap-md > div.flex.w-full');
+        const messageContainer = document.querySelector('.overflow-auto.custom-scroll');
+        if (!messageContainer) return null;
+
+        let messages = messageContainer.querySelectorAll('div[class*="w-full flex mb-lg"]');
         if (messages.length === 0) return null;
 
-        const headerSelector = '.flex.flex-col.justify-undefined.items-undefined.py-md.pt-lg.px-lg.max-mob\\:px-0.gap-sm.items-center.w-full';
         let headerHTML = '<h1 style="text-align:center; color:white;">SpicyChat Export</h1>';
-        const headerContainer = document.querySelector(headerSelector);
-        if (headerContainer) {
+        const headerContainer = document.querySelector('header > div.flex.items-center');
+         if (headerContainer) {
             const cloneHeader = headerContainer.cloneNode(true);
             const smallImg = cloneHeader.querySelector('img[width="80"]');
             if (smallImg) {
@@ -2488,10 +2545,21 @@ compactMode ? '14px' : '20px'}; border-bottom:1px solid rgba(255,255,255,0.15); 
         panel.querySelector('#profile-select').addEventListener('change', (e) => {
             const name = e.target.value;
             currentProfileName = name;
+            const charId = getCharacterId();
+
             if (name !== 'Профиль не выбран' && profiles[name]) {
                 currentSettings = {...profiles[name]};
+                if (charId) {
+                    characterProfileMap[charId] = name;
+                    saveCharacterProfileMap();
+                    showToast(`Профиль "${name}" привязан к этому персонажу`, 'info');
+                }
             } else {
                 currentSettings = {...DEFAULT_SETTINGS};
+                if (charId) {
+                    delete characterProfileMap[charId];
+                    saveCharacterProfileMap();
+                }
             }
             saveProfiles();
             applyStyles();
@@ -2647,33 +2715,25 @@ compactMode ? '14px' : '20px'}; border-bottom:1px solid rgba(255,255,255,0.15); 
                 const raw = JSON.parse(saved);
                 profiles = {};
                 Object.keys(raw).forEach(k => {
-                    const profile = raw[k];
-                    // Применение значений по умолчанию для новых настроек к старым профилям
-                    const defaultKeys = Object.keys(DEFAULT_SETTINGS);
-                    defaultKeys.forEach(key => {
-                        if (!profile.hasOwnProperty(key)) {
-                            profile[key] = DEFAULT_SETTINGS[key];
-                        }
-                    });
-                    profiles[safeDecode(k)] = profile;
+                    profiles[safeDecode(k)] = mergeWithDefaults(raw[k]);
                 });
             } else {
-                profiles = { 'Мой профиль': {...DEFAULT_SETTINGS} };
+                profiles = { 'Мой профиль': { ...DEFAULT_SETTINGS } };
             }
+
             currentProfileName = safeDecode(GM_getValue('spicychat_current_profile_v4', 'Профиль не выбран'));
+
             if (currentProfileName !== 'Профиль не выбран' && profiles[currentProfileName]) {
-                currentSettings = {...profiles[currentProfileName]};
-                 Object.keys(DEFAULT_SETTINGS).forEach(key => {
-                    if (!currentSettings.hasOwnProperty(key)) {
-                        currentSettings[key] = DEFAULT_SETTINGS[key];
-                    }
-                });
+                currentSettings = { ...profiles[currentProfileName] };
             } else {
-                currentSettings = {...DEFAULT_SETTINGS};
+                currentProfileName = 'Профиль не выбран';
+                currentSettings = { ...DEFAULT_SETTINGS };
             }
         } catch (e) {
             console.error('Load profiles error:', e);
-            currentSettings = {...DEFAULT_SETTINGS};
+            profiles = { 'Мой профиль': { ...DEFAULT_SETTINGS } };
+            currentProfileName = 'Профиль не выбран';
+            currentSettings = { ...DEFAULT_SETTINGS };
         }
     }
 
