@@ -33,11 +33,8 @@
     let lastUrl = window.location.href;
     let hideButtonTimeout = null;
     let favoriteFonts = [];
-    let globalTemplates = [];
     let compactMode = false;
     let modalPositions = {};
-    let openFolders = {};
-    let characterProfileMap = {};
 
     // Шрифты
     let systemFonts = [];
@@ -47,7 +44,7 @@
     let currentFontFilter = 'all';
     let currentFontSearch = '';
     let selectedFontForPreview = null;
-    const FONTS_PER_PAGE = 30;
+    const FONTS_PER_PAGE = 10;
 
     // Примеры текста
     const SAMPLE_TEXTS = {
@@ -90,6 +87,10 @@
         fontFamily: 'Inter',
         isGoogleFont: false,
         customFontName: '',
+        fontWeight: 400,
+        lineHeight: 150,
+        letterSpacing: 0,
+        textTransform: 'none',
         textShadow: false,
         backgroundImage: '',
         useAvatarAsBackground: false,
@@ -104,24 +105,8 @@
         userItalicColor: '#bfdbfe',
         inputBgColor: '#374151',
         cinemaMode: false,
-        googleFontsApiKey: '',
-        backgroundBrightness: 100,
-        backgroundContrast: 100,
-        backgroundSaturation: 100,
-        useGradient: false,
-        botMsgColor2: '#1f2937',
-        userMsgColor2: '#1e40af',
-        gradientAngle: 90,
-        templates: []
+        googleFontsApiKey: ''
     };
-
-    function mergeWithDefaults(profile) {
-        const newProfile = { ...DEFAULT_SETTINGS, ...profile };
-        if (!newProfile.templates || !Array.isArray(newProfile.templates)) {
-            newProfile.templates = [];
-        }
-        return newProfile;
-    }
 
     function safeEncode(str) { try { return encodeURIComponent(str); } catch (e) { return str; } }
     function safeDecode(str) { try { return decodeURIComponent(str); } catch (e) { return str; } }
@@ -219,141 +204,6 @@
         }
     }
 
-    function openMoveTemplateModal(itemId, itemType) {
-        let modal = document.getElementById('move-template-modal');
-        if (modal) modal.remove();
-
-        modal = document.createElement('div');
-        modal.id = 'move-template-modal';
-        modal.style.cssText = `
-            position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-            z-index: 10004; font-family: 'Inter', sans-serif;
-        `;
-
-        modal.innerHTML = `
-            <div style="background: #2d3748; padding: 20px; border-radius: 10px; width: 400px; color: white; box-shadow: 0 20px 60px rgba(0,0,0,0.5);">
-                <h3 style="margin-top:0; text-align:center;">Переместить элемент</h3>
-                <select id="move-target-select" style="width: 100%; padding: 8px; margin: 10px 0; border-radius: 5px; background: #1a202c; color: white; border:1px solid #4a5568;"></select>
-                <div style="display: flex; gap: 10px; margin-top: 15px;">
-                    <button id="move-confirm-btn" style="flex:1; padding: 8px; background: #10b981; color: white; border: none; border-radius: 5px; cursor: pointer;">Переместить</button>
-                    <button id="move-cancel-btn" style="flex:1; padding: 8px; background: #4a5568; color: white; border: none; border-radius: 5px; cursor: pointer;">Отмена</button>
-                </div>
-            </div>
-        `;
-
-        document.body.appendChild(modal);
-
-        const select = modal.querySelector('#move-target-select');
-
-        const optgroupGlobal = document.createElement('optgroup');
-        optgroupGlobal.label = '🌐 Общие';
-        const rootGlobal = document.createElement('option');
-        rootGlobal.value = 'global-root';
-        rootGlobal.textContent = 'Корневая папка';
-        optgroupGlobal.appendChild(rootGlobal);
-        select.appendChild(optgroupGlobal);
-
-        function findFolders(nodes, prefix = '', parentGroup) {
-            nodes.forEach(node => {
-                if (node.type === 'folder') {
-                    const option = document.createElement('option');
-                    option.value = node.id;
-                    option.textContent = prefix + node.title;
-                    parentGroup.appendChild(option);
-                    if (node.children) {
-                        findFolders(node.children, prefix + '-- ', parentGroup);
-                    }
-                }
-            });
-        }
-
-        findFolders(globalTemplates, '', optgroupGlobal);
-
-        if (currentProfileName !== 'Профиль не выбран') {
-            const optgroupProfile = document.createElement('optgroup');
-            optgroupProfile.label = `👤 ${currentProfileName}`;
-            const rootProfile = document.createElement('option');
-            rootProfile.value = 'profile-root';
-            rootProfile.textContent = 'Корневая папка';
-            optgroupProfile.appendChild(rootProfile);
-            select.appendChild(optgroupProfile);
-            findFolders(currentSettings.templates || [], '', optgroupProfile);
-        }
-
-        modal.querySelector('#move-cancel-btn').onclick = () => modal.remove();
-        modal.querySelector('#move-confirm-btn').onclick = () => {
-            moveTemplate(itemId, itemType, select.value);
-            modal.remove();
-        };
-    }
-
-    function moveTemplate(itemId, fromType, toId) {
-        const fromArray = fromType === 'profile' ? currentSettings.templates : globalTemplates;
-        let itemToMove = null;
-        let originalParent = null;
-
-        function findAndExtract(nodes, parent) {
-            for (let i = 0; i < nodes.length; i++) {
-                if (nodes[i].id === itemId) {
-                    itemToMove = nodes.splice(i, 1)[0];
-                    originalParent = parent;
-                    return;
-                }
-                if (nodes[i].children) {
-                    findAndExtract(nodes[i].children, nodes[i]);
-                    if (itemToMove) return;
-                }
-            }
-        }
-
-        findAndExtract(fromArray, null);
-
-        if (!itemToMove) {
-            showToast('Элемент для перемещения не найден', 'error');
-            return;
-        }
-
-        let toArray;
-        let toParent = null;
-
-        if (toId === 'global-root') {
-            toArray = globalTemplates;
-        } else if (toId === 'profile-root') {
-            toArray = currentSettings.templates;
-        } else {
-            function findTarget(nodes) {
-                for (const node of nodes) {
-                    if (node.id === toId && node.type === 'folder') return node;
-                    if (node.children) {
-                        const found = findTarget(node.children);
-                        if (found) return found;
-                    }
-                }
-                return null;
-            }
-            toParent = findTarget(globalTemplates) || findTarget(currentSettings.templates || []);
-            if (toParent) {
-                toArray = toParent.children;
-            }
-        }
-
-        if (toArray) {
-            toArray.push(itemToMove);
-            saveProfiles();
-            saveGlobalTemplates();
-            renderTemplatesList();
-            showToast('Элемент перемещен', 'success');
-        } else {
-            // Rollback
-            if (originalParent) {
-                originalParent.children.push(itemToMove);
-            } else {
-                fromArray.push(itemToMove);
-            }
-            showToast('Не удалось найти целевую папку', 'error');
-        }
-    }
-
     function saveModalPositions() {
         GM_setValue('spicychat_modal_positions', JSON.stringify(modalPositions));
     }
@@ -389,7 +239,7 @@
             fontLinkElement.rel = 'stylesheet';
             document.head.appendChild(fontLinkElement);
         }
-        fontLinkElement.href = `https://fonts.googleapis.com/css2?family=${fontName.replace(/ /g, '+')}:wght@400;700&display=swap`;
+        fontLinkElement.href = `https://fonts.googleapis.com/css2?family=${fontName.replace(/ /g, '+')}:wght@100;200;300;400;500;600;700;800;900&display=swap`;
     }
 
     function detectSystemFonts() {
@@ -519,96 +369,6 @@
         }
     }
 
-    // === ШАБЛОНЫ / БЫСТРЫЕ ОТВЕТЫ ===
-    function saveCharacterProfileMap() {
-        GM_setValue('spicychat_char_profiles', JSON.stringify(characterProfileMap));
-    }
-
-    function loadCharacterProfileMap() {
-        const saved = GM_getValue('spicychat_char_profiles', null);
-        if (saved) {
-            characterProfileMap = JSON.parse(saved);
-        }
-    }
-
-    function generateId() {
-        return '_' + Math.random().toString(36).substr(2, 9);
-    }
-
-    function runTemplateStructureMigration() {
-        const migrationDone = GM_getValue('spicychat_template_migration_v3', false);
-        if (migrationDone) return;
-
-        const convertArray = (arr) => {
-            if (!arr || !Array.isArray(arr)) return [];
-            if (arr.length > 0 && arr[0].type) return arr;
-
-            return arr.map(item => ({
-                id: generateId(),
-                type: 'template',
-                title: item.title,
-                content: item.content
-            }));
-        };
-
-        globalTemplates = convertArray(globalTemplates);
-        saveGlobalTemplates();
-
-        Object.keys(profiles).forEach(profileName => {
-            if (profiles[profileName].templates) {
-                profiles[profileName].templates = convertArray(profiles[profileName].templates);
-            }
-        });
-        saveProfiles();
-
-        GM_setValue('spicychat_template_migration_v3', true);
-        console.log("SpicyChat Editor: Migrated templates to new folder-ready structure.");
-    }
-
-    function saveGlobalTemplates() {
-        GM_setValue('spicychat_global_templates', JSON.stringify(globalTemplates));
-    }
-
-    function loadGlobalTemplates() {
-        const saved = GM_getValue('spicychat_global_templates', null);
-        if (saved) {
-            globalTemplates = JSON.parse(saved);
-        } else {
-            globalTemplates = [
-                { title: 'Пример OOC (общий)', content: '((Я сейчас отойду на пару минут))' }
-            ];
-        }
-    }
-
-    function runTemplateMigration() {
-        const migrationDone = GM_getValue('spicychat_template_migration_v2', false);
-        if (migrationDone) return;
-
-        const oldTemplatesRaw = GM_getValue('spicychat_chat_templates', null);
-        if (oldTemplatesRaw) {
-            try {
-                const oldTemplates = JSON.parse(oldTemplatesRaw);
-                const globalTemplatesRaw = GM_getValue('spicychat_global_templates', '[]');
-                let currentGlobalTemplates = JSON.parse(globalTemplatesRaw);
-
-                oldTemplates.forEach(oldTpl => {
-                    if (!currentGlobalTemplates.some(t => t.title === oldTpl.title && t.content === oldTpl.content)) {
-                        currentGlobalTemplates.push(oldTpl);
-                    }
-                });
-
-                GM_setValue('spicychat_global_templates', JSON.stringify(currentGlobalTemplates));
-                GM_setValue('spicychat_template_migration_v2', true);
-                console.log("SpicyChat Editor: Migrated old templates to global storage.");
-                showToast('Шаблоны перенесены в новое хранилище', 'info');
-            } catch (e) {
-                console.error("Template migration failed:", e);
-            }
-        } else {
-            GM_setValue('spicychat_template_migration_v2', true);
-        }
-    }
-
     // === ИМПОРТ/ЭКСПОРТ ПРОФИЛЕЙ ===
     function exportProfiles() {
         const data = {
@@ -648,7 +408,7 @@
                     }
 
                     Object.keys(data.profiles).forEach(key => {
-                        profiles[key] = mergeWithDefaults(data.profiles[key]);
+                        profiles[key] = data.profiles[key];
                     });
 
                     if (data.favoriteFonts) {
@@ -707,7 +467,7 @@
             counter++;
         }
 
-        profiles[newName] = mergeWithDefaults({ ...profiles[profileName] });
+        profiles[newName] = { ...profiles[profileName] };
         saveProfiles();
         updatePanelUI();
         showToast(`Создан "${newName}"`, 'success');
@@ -733,14 +493,6 @@
         if (currentProfileName === oldName) {
             currentProfileName = newName;
         }
-
-        // Update character profile map
-        Object.keys(characterProfileMap).forEach(charId => {
-            if (characterProfileMap[charId] === oldName) {
-                characterProfileMap[charId] = newName;
-            }
-        });
-        saveCharacterProfileMap();
 
         saveProfiles();
         updatePanelUI();
@@ -837,6 +589,34 @@
                                         <input type="checkbox" id="text-shadow-check" ${currentSettings.textShadow ? 'checked' : ''} style="width: 14px; height: 14px; cursor: pointer;">
                                         <span style="color: white; font-size: 11px; font-weight: 600;">✨ Тень</span>
                                     </label>
+                                </div>
+                            </div>
+
+                             <div style="margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 10px;">
+                                <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                                    <div style="flex:1;">
+                                        <label style="display: block; color: white; font-size: 11px; margin-bottom: 5px; font-weight: 600;">Толщина:</label>
+                                        <input type="range" id="text-font-weight-slider" min="100" max="900" step="100" value="400" style="width: 100%; height: 4px; accent-color: #60a5fa;">
+                                    </div>
+                                    <div style="flex:1;">
+                                        <label style="display: block; color: white; font-size: 11px; margin-bottom: 5px; font-weight: 600;">Трансформация:</label>
+                                        <select id="text-transform-select" style="width: 100%; padding: 5px; background: #374151; color: white; border: 1px solid #4b5563; border-radius: 4px; font-size: 12px;">
+                                            <option value="none">Нет</option>
+                                            <option value="uppercase">ВЕРХНИЙ РЕГИСТР</option>
+                                            <option value="lowercase">нижний регистр</option>
+                                            <option value="capitalize">Капитализация</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div style="display: flex; gap: 10px;">
+                                    <div style="flex:1;">
+                                        <label style="display: block; color: white; font-size: 11px; margin-bottom: 5px; font-weight: 600;">Высота строки (%):</label>
+                                        <input type="range" id="text-line-height-slider" min="80" max="300" value="150" style="width: 100%; height: 4px; accent-color: #60a5fa;">
+                                    </div>
+                                    <div style="flex:1;">
+                                        <label style="display: block; color: white; font-size: 11px; margin-bottom: 5px; font-weight: 600;">Межбукв. интервал (px):</label>
+                                        <input type="range" id="text-letter-spacing-slider" min="-2" max="10" step="0.1" value="0" style="width: 100%; height: 4px; accent-color: #60a5fa;">
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -969,6 +749,30 @@
             saveProfiles();
         });
 
+        modal.querySelector('#text-font-weight-slider').addEventListener('input', (e) => {
+            currentSettings.fontWeight = parseInt(e.target.value);
+            applyStyles();
+            saveProfiles();
+        });
+
+        modal.querySelector('#text-line-height-slider').addEventListener('input', (e) => {
+            currentSettings.lineHeight = parseInt(e.target.value);
+            applyStyles();
+            saveProfiles();
+        });
+
+        modal.querySelector('#text-letter-spacing-slider').addEventListener('input', (e) => {
+            currentSettings.letterSpacing = parseFloat(e.target.value);
+            applyStyles();
+            saveProfiles();
+        });
+
+        modal.querySelector('#text-transform-select').addEventListener('change', (e) => {
+            currentSettings.textTransform = e.target.value;
+            applyStyles();
+            saveProfiles();
+        });
+
         if (systemFonts.length === 0) {
             systemFonts = detectSystemFonts();
         }
@@ -997,6 +801,10 @@
         modal.querySelector('#text-google-fonts-api-key').value = currentSettings.googleFontsApiKey || '';
         modal.querySelector('#text-message-align').value = currentSettings.messageAlign;
         modal.querySelector('#text-shadow-check').checked = currentSettings.textShadow;
+        modal.querySelector('#text-font-weight-slider').value = currentSettings.fontWeight;
+        modal.querySelector('#text-line-height-slider').value = currentSettings.lineHeight;
+        modal.querySelector('#text-letter-spacing-slider').value = currentSettings.letterSpacing;
+        modal.querySelector('#text-transform-select').value = currentSettings.textTransform;
     }
 
     function updateFontFilterOptions() {
@@ -1232,7 +1040,7 @@
                             <input type="file" id="visual-file-upload" accept="image/*" style="display: none;">
                         </div>
 
-                        <div style="display: flex; gap: 6px; margin-bottom: 10px;">
+                        <div style="display: flex; gap: 6px;">
                             <div style="flex: 1;">
                                 <label style="display: block; color: #9ca3af; font-size: 9px; margin-bottom: 3px;" title="Как изображение заполняет фон">Размер:</label>
                                 <select id="visual-background-size" title="Размер фона" style="width: 100%; padding: 5px; background: #374151; color: white; border: 1px solid #4b5563; border-radius: 4px; font-size: 10px;">
@@ -1249,12 +1057,6 @@
                                 </select>
                             </div>
                         </div>
-                        <div style="background: rgba(0,0,0,0.2); padding: 8px; border-radius: 5px;">
-                            <div style="color: #9ca3af; font-size: 10px; margin-bottom: 5px; font-weight: 600; text-align: center;">Фильтры фона</div>
-                             ${createSlider('backgroundBrightness', '🔆 Яркость', 0, 200, currentSettings.backgroundBrightness, '%', 'Яркость фона (0-200%)')}
-                             ${createSlider('backgroundContrast', '🌗 Контраст', 0, 200, currentSettings.backgroundContrast, '%', 'Контраст фона (0-200%)')}
-                             ${createSlider('backgroundSaturation', '🎨 Насыщенность', 0, 200, currentSettings.backgroundSaturation, '%', 'Насыщенность фона (0-200%)')}
-                        </div>
                     </div>
 
                     <!-- Цвета -->
@@ -1265,24 +1067,17 @@
                         </label>
 
                         <div id="visual-colors-container" style="${currentSettings.useCustomColors ? '' : 'opacity:0.4; pointer-events:none;'}">
-                             <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; margin-bottom: 8px; padding: 5px; background: rgba(255,255,255,0.05); border-radius: 5px;" title="Использовать градиент вместо сплошного цвета">
-                                <input type="checkbox" id="visual-use-gradient" ${currentSettings.useGradient ? 'checked' : ''} style="width: 14px; height: 14px; cursor: pointer;">
-                                <span style="color: white; font-size: 11px; font-weight: 600;">Gradients</span>
-                            </label>
-                            ${createSlider('gradientAngle', '↔️ Угол', 0, 360, currentSettings.gradientAngle, '°', 'Угол градиента')}
                             <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:10px;">
                                 <div style="background: rgba(0,0,0,0.2); padding: 6px; border-radius: 5px;">
                                     <div style="color: #9ca3af; font-size: 10px; margin-bottom: 5px; font-weight: 600; text-align: center;">🤖 БОТ</div>
-                                    ${createColorInput('visual-bot-msg-color', 'Цвет 1', currentSettings.botMsgColor)}
-                                    ${createColorInput('visual-bot-msg-color-2', 'Цвет 2', currentSettings.botMsgColor2)}
+                                    ${createColorInput('visual-bot-msg-color', 'Фон', currentSettings.botMsgColor)}
                                     ${createColorInput('visual-bot-text-color', 'Текст', currentSettings.botTextColor)}
                                     ${createColorInput('visual-bot-italic-color', 'Курсив', currentSettings.botItalicColor)}
                                 </div>
 
                                 <div style="background: rgba(0,0,0,0.2); padding: 6px; border-radius: 5px;">
                                     <div style="color: #9ca3af; font-size: 10px; margin-bottom: 5px; font-weight: 600; text-align: center;">👤 ВЫ</div>
-                                    ${createColorInput('visual-user-msg-color', 'Цвет 1', currentSettings.userMsgColor)}
-                                    ${createColorInput('visual-user-msg-color-2', 'Цвет 2', currentSettings.userMsgColor2)}
+                                    ${createColorInput('visual-user-msg-color', 'Фон', currentSettings.userMsgColor)}
                                     ${createColorInput('visual-user-text-color', 'Текст', currentSettings.userTextColor)}
                                     ${createColorInput('visual-user-italic-color', 'Курсив', currentSettings.userItalicColor)}
                                 </div>
@@ -1336,10 +1131,6 @@
         bindSlider('chatWidth', 'chatWidth');
         bindSlider('inputWidth', 'inputWidth');
         bindSlider('inputHeight', 'inputHeight');
-        bindSlider('backgroundBrightness', 'backgroundBrightness');
-        bindSlider('backgroundContrast', 'backgroundContrast');
-        bindSlider('backgroundSaturation', 'backgroundSaturation');
-        bindSlider('gradientAngle', 'gradientAngle');
 
         modal.querySelector('#visual-header-avatar-size').addEventListener('change', (e) => {
             currentSettings.headerAvatarSize = e.target.value;
@@ -1410,20 +1201,12 @@
             });
         };
 
-        modal.querySelector('#visual-use-gradient').addEventListener('change', (e) => {
-            currentSettings.useGradient = e.target.checked;
-            applyStyles();
-            saveProfiles();
-        });
-
         bindColor('visual-bot-msg-color', 'botMsgColor');
         bindColor('visual-bot-text-color', 'botTextColor');
         bindColor('visual-bot-italic-color', 'botItalicColor');
-        bindColor('visual-bot-msg-color-2', 'botMsgColor2');
         bindColor('visual-user-msg-color', 'userMsgColor');
         bindColor('visual-user-text-color', 'userTextColor');
         bindColor('visual-user-italic-color', 'userItalicColor');
-        bindColor('visual-user-msg-color-2', 'userMsgColor2');
         bindColor('visual-input-bg-color', 'inputBgColor');
 
         updateVisualSettingsUI();
@@ -1433,7 +1216,7 @@
         const modal = document.getElementById('visual-settings-modal');
         if (!modal) return;
 
-        ['chatOpacity', 'blurAmount', 'bubbleRadius', 'chatWidth', 'inputWidth', 'inputHeight', 'backgroundBrightness', 'backgroundContrast', 'backgroundSaturation', 'gradientAngle'].forEach(k => {
+        ['chatOpacity', 'blurAmount', 'bubbleRadius', 'chatWidth', 'inputWidth', 'inputHeight'].forEach(k => {
             const slider = modal.querySelector(`#visual-slider-${k}`);
             const input = modal.querySelector(`#visual-input-${k}`);
             if (slider) slider.value = currentSettings[k];
@@ -1452,429 +1235,13 @@
         modal.querySelector('#visual-colors-container').style.opacity = currentSettings.useCustomColors ? '1' : '0.4';
         modal.querySelector('#visual-colors-container').style.pointerEvents = currentSettings.useCustomColors ? 'auto' : 'none';
 
-        modal.querySelector('#visual-use-gradient').checked = currentSettings.useGradient;
-
         modal.querySelector('#visual-bot-msg-color').value = currentSettings.botMsgColor;
-        modal.querySelector('#visual-bot-msg-color-2').value = currentSettings.botMsgColor2;
         modal.querySelector('#visual-bot-text-color').value = currentSettings.botTextColor;
         modal.querySelector('#visual-bot-italic-color').value = currentSettings.botItalicColor;
         modal.querySelector('#visual-user-msg-color').value = currentSettings.userMsgColor;
-        modal.querySelector('#visual-user-msg-color-2').value = currentSettings.userMsgColor2;
         modal.querySelector('#visual-user-text-color').value = currentSettings.userTextColor;
         modal.querySelector('#visual-user-italic-color').value = currentSettings.userItalicColor;
         modal.querySelector('#visual-input-bg-color').value = currentSettings.inputBgColor;
-    }
-
-    // === МОДАЛЬНОЕ ОКНО ШАБЛОНОВ ===
-    function openTemplatesModal() {
-        let modal = document.getElementById('templates-modal');
-        if (modal) {
-            modal.style.display = 'flex';
-            renderTemplatesList();
-            return;
-        }
-
-        modal = document.createElement('div');
-        modal.id = 'templates-modal';
-        modal.style.cssText = `
-            position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-            z-index: 10002; display: flex; align-items: center; justify-content: center;
-            font-family: 'Inter', sans-serif;
-        `;
-
-        modal.innerHTML = `
-            <div style="background: #1f2937; border-radius: 8px; width: 600px; max-height: 90vh; display: flex; flex-direction: column; border: 1px solid rgba(255,255,255,0.15); box-shadow: 0 20px 60px rgba(0,0,0,0.5);">
-                <div id="templates-modal-header" style="padding: 12px 16px; border-bottom: 1px solid rgba(255,255,255,0.1); display: flex; justify-content: space-between; align-items: center; background: linear-gradient(135deg, #1f2937 0%, #374151 100%);">
-                    <h3 style="margin: 0; color: white; font-size: 16px; font-weight: 700;">📋 Шаблоны / Быстрые ответы</h3>
-                    <button id="close-templates-modal" title="Закрыть" style="background: rgba(255,255,255,0.1); border: none; color: white; font-size: 22px; cursor: pointer; padding: 0; width: 30px; height: 30px; border-radius: 5px;">×</button>
-                </div>
-
-                <div style="display: flex; flex: 1; overflow: hidden; min-height: 500px;">
-                    <div style="width: 40%; border-right: 1px solid rgba(255,255,255,0.1); display: flex; flex-direction: column; background: #111827;">
-
-                        <div style="padding: 8px; border-bottom: 1px solid rgba(255,255,255,0.1); display:flex; gap: 8px;">
-                            <input type="text" id="template-search-input" placeholder="🔍 Поиск..." style="width: 100%; padding: 6px; background: #374151; color: white; border: 1px solid #4b5563; border-radius: 4px; font-size: 12px;">
-                            <button id="add-folder-btn" title="Создать папку" style="padding: 6px 10px; background: #4b5563; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight:600;">📁+</button>
-                        </div>
-
-                        <div id="templates-list-container" style="flex: 1; overflow-y: auto;">
-                            <!-- Template list will be rendered here -->
-                        </div>
-                    </div>
-
-                    <div style="width: 60%; padding: 16px; display: flex; flex-direction: column; gap: 12px;">
-                        <h4 id="template-editor-title" style="margin:0; color:white; font-size: 14px; font-weight:600;">Новый шаблон</h4>
-                        <input type="hidden" id="template-edit-index" value="-1">
-                        <input type="hidden" id="template-edit-type" value="global">
-                        <input type="text" id="template-title-input" placeholder="Название шаблона" style="width: 100%; padding: 8px; background: #374151; color: white; border: 1px solid #4b5563; border-radius: 4px; font-size: 13px;">
-                        <textarea id="template-content-input" placeholder="Текст шаблона..." style="width: 100%; flex: 1; padding: 8px; background: #374151; color: white; border: 1px solid #4b5563; border-radius: 4px; font-size: 13px; resize: vertical;"></textarea>
-
-                        <select id="template-folder-select" style="width: 100%; padding: 8px; margin-top: 12px; background: #374151; color: white; border: 1px solid #4b5563; border-radius: 4px; font-size: 12px;"></select>
-
-                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 8px; background: rgba(255,255,255,0.05); border-radius: 5px;" title="Если включено, шаблон будет виден только в текущем профиле">
-                            <input type="checkbox" id="template-is-profile-specific" style="width: 15px; height: 15px; cursor: pointer;">
-                            <span style="color: white; font-size: 12px; font-weight: 600;">Привязать к текущему профилю</span>
-                        </label>
-
-                        <div style="display:flex; gap: 10px;">
-                            <button id="save-template-btn" style="flex:1; padding: 9px; background: #10b981; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight:600;">Сохранить</button>
-                            <button id="clear-template-form-btn" style="padding: 9px; background: #4b5563; color: white; border: none; border-radius: 5px; cursor: pointer;">Очистить</button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        `;
-
-        document.body.appendChild(modal);
-        applyModalPosition(modal);
-        makeDraggable(modal, modal.querySelector('#templates-modal-header'));
-
-        modal.querySelector('#close-templates-modal').addEventListener('click', () => modal.style.display = 'none');
-        modal.querySelector('#save-template-btn').addEventListener('click', saveTemplate);
-        modal.querySelector('#clear-template-form-btn').addEventListener('click', clearTemplateForm);
-
-        modal.querySelector('#template-search-input').addEventListener('input', (e) => {
-            renderTemplatesList(e.target.value);
-        });
-        modal.querySelector('#add-folder-btn').addEventListener('click', createNewFolder);
-
-        modal.querySelector('#template-is-profile-specific').addEventListener('change', updateFolderSelector);
-
-
-        renderTemplatesList();
-        updateFolderSelector();
-    }
-
-    function updateFolderSelector() {
-        const select = document.getElementById('template-folder-select');
-        const isProfileSpecific = document.getElementById('template-is-profile-specific').checked;
-        const templates = isProfileSpecific ? (currentSettings.templates || []) : globalTemplates;
-
-        select.innerHTML = '<option value="-1">-- Корневая папка --</option>';
-
-        function findFolders(nodes, prefix = '') {
-            nodes.forEach(node => {
-                if (node.type === 'folder') {
-                    const option = document.createElement('option');
-                    option.value = node.id;
-                    option.textContent = prefix + node.title;
-                    select.appendChild(option);
-                    if (node.children) {
-                        findFolders(node.children, prefix + '-- ');
-                    }
-                }
-            });
-        }
-
-        findFolders(templates);
-    }
-
-    function createNewFolder() {
-        const folderName = prompt("Введите название папки:");
-        if (!folderName || folderName.trim() === '') return;
-
-        const isProfileSpecific = document.getElementById('template-is-profile-specific')?.checked;
-
-        if (isProfileSpecific && currentProfileName === 'Профиль не выбран') {
-            showToast('Выберите профиль для создания папки', 'error');
-            return;
-        }
-
-        const newFolder = {
-            id: generateId(),
-            type: 'folder',
-            title: folderName.trim(),
-            children: []
-        };
-
-        if (isProfileSpecific) {
-            if (!currentSettings.templates) {
-                currentSettings.templates = [];
-            }
-            currentSettings.templates.push(newFolder);
-            saveProfiles();
-            showToast(`Папка "${folderName}" создана в профиле`, 'success');
-        } else {
-            globalTemplates.push(newFolder);
-            saveGlobalTemplates();
-            showToast(`Папка "${folderName}" создана`, 'success');
-        }
-
-        renderTemplatesList();
-        updateFolderSelector();
-    }
-
-
-    function findItemPath(nodes, id, currentPath = []) {
-        for (const node of nodes) {
-            const newPath = [...currentPath, node];
-            if (node.id === id) {
-                return newPath;
-            }
-            if (node.type === 'folder' && node.children) {
-                const foundPath = findItemPath(node.children, id, newPath);
-                if (foundPath) {
-                    return foundPath;
-                }
-            }
-        }
-        return null;
-    }
-
-
-    function renderTemplatesList(searchQuery = '') {
-        const container = document.getElementById('templates-list-container');
-        if (!container) return;
-        container.innerHTML = '';
-        const lowerCaseQuery = searchQuery.toLowerCase().trim();
-
-        const filterNodes = (nodes) => {
-            if (!lowerCaseQuery) return nodes;
-
-            const filtered = [];
-            for (const node of nodes) {
-                if (node.type === 'template') {
-                    if (node.title.toLowerCase().includes(lowerCaseQuery) || node.content.toLowerCase().includes(lowerCaseQuery)) {
-                        filtered.push(node);
-                    }
-                } else if (node.type === 'folder') {
-                    const filteredChildren = filterNodes(node.children || []);
-                    if (filteredChildren.length > 0 || node.title.toLowerCase().includes(lowerCaseQuery)) {
-                        filtered.push({ ...node, children: filteredChildren });
-                    }
-                }
-            }
-            return filtered;
-        };
-
-
-        const renderNode = (node, parentContainer, type, level = 0) => {
-            const item = document.createElement('div');
-            item.style.marginLeft = `${level * 15}px`;
-
-            if (node.type === 'folder') {
-                const isOpen = openFolders[node.id] || !!searchQuery;
-                item.style.cssText = `padding: 10px 12px; background: #1a202c; border-top: 1px solid #374151; font-weight: bold; cursor: pointer; color: #a0aec0; display: flex; justify-content: space-between; align-items: center; margin-left: ${level * 15}px;`;
-                item.innerHTML = `
-                    <div>${isOpen ? '📂' : '📁'} ${node.title}</div>
-                    <div style="display:flex; gap: 5px;">
-                        <button class="delete-template-btn" title="Удалить папку" style="background: #ef4444; border:none; color:white; border-radius:4px; width:22px; height:22px; font-size:12px;">🗑️</button>
-                    </div>
-                `;
-                item.addEventListener('click', (e) => {
-                    if (e.target.classList.contains('delete-template-btn')) return;
-                    openFolders[node.id] = !isOpen;
-                    renderTemplatesList(searchQuery);
-                });
-                item.querySelector('.delete-template-btn').addEventListener('click', () => deleteTemplate(node.id, type));
-
-                parentContainer.appendChild(item);
-
-                if (isOpen && node.children) {
-                    const childrenContainer = document.createElement('div');
-                    node.children.forEach(child => renderNode(child, childrenContainer, type, level + 1));
-                    parentContainer.appendChild(childrenContainer);
-                }
-            } else { // template
-                item.style.cssText = `padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,0.05); display: flex; justify-content: space-between; align-items: center; cursor: pointer; margin-left: ${level * 15}px;`;
-                item.innerHTML = `
-                    <div style="color: white; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${node.title}">📝 ${node.title}</div>
-                    <div style="display:flex; gap: 5px;">
-                        <button class="move-template-btn" title="Переместить" style="background: #3b82f6; border:none; color:white; border-radius:4px; width:22px; height:22px; font-size:12px;">↔️</button>
-                        <button class="delete-template-btn" title="Удалить" style="background: #ef4444; border:none; color:white; border-radius:4px; width:22px; height:22px; font-size:12px;">🗑️</button>
-                    </div>
-                `;
-                item.addEventListener('click', (e) => {
-                    if (e.target.classList.contains('delete-template-btn') || e.target.classList.contains('move-template-btn')) return;
-                    editTemplate(node.id, type);
-                });
-                item.querySelector('.delete-template-btn').addEventListener('click', () => deleteTemplate(node.id, type));
-                item.querySelector('.move-template-btn').addEventListener('click', () => openMoveTemplateModal(node.id, type));
-                parentContainer.appendChild(item);
-            }
-        };
-
-        const renderSection = (title, templates, type) => {
-            const sectionWrapper = document.createElement('div');
-            const titleEl = document.createElement('h5');
-            titleEl.style.cssText = `padding: 10px 12px 5px; margin: 5px 0 0; color: #9ca3af; font-size: 11px; font-weight: 600; text-transform: uppercase;`;
-            titleEl.textContent = title;
-            sectionWrapper.appendChild(titleEl);
-
-            const filteredTemplates = filterNodes(templates);
-
-            if (filteredTemplates.length === 0) {
-                const emptyEl = document.createElement('div');
-                emptyEl.style.cssText = `padding: 10px 12px; color: #6b7280; font-size: 12px;`;
-                emptyEl.textContent = 'Пусто';
-                sectionWrapper.appendChild(emptyEl);
-            } else {
-                filteredTemplates.forEach(node => renderNode(node, sectionWrapper, type));
-            }
-            return sectionWrapper;
-        };
-
-        container.appendChild(renderSection('🌐 Общие', globalTemplates, 'global'));
-
-        const profileName = currentProfileName !== 'Профиль не выбран' ? `👤 ${currentProfileName}` : '👤 Профиль не выбран';
-        const profileTemplates = (currentProfileName !== 'Профиль не выбран' && currentSettings.templates) ? currentSettings.templates : [];
-        const profileSection = renderSection(profileName, profileTemplates, 'profile');
-        if (currentProfileName === 'Профиль не выбран') {
-            profileSection.style.opacity = '0.5';
-        }
-        container.appendChild(profileSection);
-    }
-
-    function saveTemplate() {
-        const titleInput = document.getElementById('template-title-input');
-        const contentInput = document.getElementById('template-content-input');
-        const idInput = document.getElementById('template-edit-index');
-        const isProfileSpecificCheckbox = document.getElementById('template-is-profile-specific');
-        const folderSelect = document.getElementById('template-folder-select');
-
-        const title = titleInput.value.trim();
-        const content = contentInput.value.trim();
-        const id = idInput.value;
-        const isProfileSpecific = isProfileSpecificCheckbox.checked;
-        const folderId = folderSelect.value;
-
-        if (!title || !content) {
-            showToast('Название и текст не могут быть пустыми', 'error');
-            return;
-        }
-
-        if (isProfileSpecific && currentProfileName === 'Профиль не выбран') {
-            showToast('Выберите профиль для сохранения', 'error');
-            return;
-        }
-
-        const newTemplate = { id: id !== '-1' ? id : generateId(), type: 'template', title, content };
-
-        if (id === '-1') { // Creating new
-            const targetArray = isProfileSpecific ? currentSettings.templates : globalTemplates;
-            let parentFolder = null;
-
-            function findFolder(nodes, fId) {
-                for (const node of nodes) {
-                    if (node.id === fId && node.type === 'folder') return node;
-                    if (node.children) {
-                        const found = findFolder(node.children, fId);
-                        if (found) return found;
-                    }
-                }
-                return null;
-            }
-
-            if (folderId !== '-1') {
-                parentFolder = findFolder(targetArray, folderId);
-            }
-
-            if (parentFolder) {
-                parentFolder.children.push(newTemplate);
-            } else {
-                targetArray.push(newTemplate);
-            }
-
-            if (isProfileSpecific) {
-                saveProfiles();
-                showToast('Шаблон добавлен в профиль', 'success');
-            } else {
-                saveGlobalTemplates();
-                showToast('Общий шаблон добавлен', 'success');
-            }
-        } else { // Editing existing
-            const path = findItemPath(globalTemplates, id) || (currentSettings.templates ? findItemPath(currentSettings.templates, id) : null);
-            if (path) {
-                const itemToUpdate = path[path.length - 1];
-                itemToUpdate.title = title;
-                itemToUpdate.content = content;
-
-                const type = findItemPath(globalTemplates, id) ? 'global' : 'profile';
-                if (type === 'profile') {
-                    saveProfiles();
-                } else {
-                    saveGlobalTemplates();
-                }
-                showToast('Шаблон обновлен', 'success');
-            }
-        }
-
-        renderTemplatesList(document.getElementById('template-search-input').value);
-        clearTemplateForm();
-    }
-
-    function editTemplate(id, type) {
-        const allTemplates = type === 'global' ? globalTemplates : currentSettings.templates;
-        const path = findItemPath(allTemplates, id);
-        if (!path) return;
-        const template = path[path.length - 1];
-
-        if (!template || template.type !== 'template') return;
-
-        document.getElementById('template-editor-title').textContent = 'Редактирование';
-        document.getElementById('template-edit-index').value = id; // Use this to store ID
-        document.getElementById('template-title-input').value = template.title;
-        document.getElementById('template-content-input').value = template.content;
-
-        const checkbox = document.getElementById('template-is-profile-specific');
-        checkbox.checked = type === 'profile';
-        checkbox.disabled = true;
-    }
-
-    function deleteTemplate(id, type) {
-        const targetArray = type === 'profile' ? currentSettings.templates : globalTemplates;
-
-        let parent = null;
-        let itemIndex = -1;
-
-        const findAndRemove = (nodes, parentNode) => {
-            for (let i = 0; i < nodes.length; i++) {
-                if (nodes[i].id === id) {
-                    parent = parentNode;
-                    itemIndex = i;
-                    return nodes[i];
-                }
-                if (nodes[i].type === 'folder' && nodes[i].children) {
-                    const found = findAndRemove(nodes[i].children, nodes[i]);
-                    if (found) return found;
-                }
-            }
-            return null;
-        };
-
-        const itemToDelete = findAndRemove(targetArray, null);
-
-        if (itemToDelete) {
-            const listToRemoveFrom = parent ? parent.children : targetArray;
-            const confirmMessage = itemToDelete.type === 'folder'
-                ? `Удалить папку "${itemToDelete.title}" и всё её содержимое?`
-                : `Удалить шаблон "${itemToDelete.title}"?`;
-
-            if (confirm(confirmMessage)) {
-                listToRemoveFrom.splice(itemIndex, 1);
-
-                if (type === 'profile') {
-                    saveProfiles();
-                } else {
-                    saveGlobalTemplates();
-                }
-
-                renderTemplatesList(document.getElementById('template-search-input').value);
-                clearTemplateForm();
-                showToast('Элемент удален', 'success');
-            }
-        }
-    }
-
-
-    function clearTemplateForm() {
-        document.getElementById('template-editor-title').textContent = 'Новый шаблон';
-        document.getElementById('template-edit-index').value = -1;
-        document.getElementById('template-title-input').value = '';
-        document.getElementById('template-content-input').value = '';
-        const checkbox = document.getElementById('template-is-profile-specific');
-        checkbox.checked = false;
-        checkbox.disabled = false;
     }
 
     function uploadImageToCatbox(file, callback) {
@@ -1892,287 +1259,6 @@
                 }
             },
             onerror: function(err) { showToast("Ошибка соединения", 'error'); }
-        });
-    }
-
-    function createTemplatesAccessButton() {
-        const oldBtn = document.getElementById('templates-access-btn');
-        if (oldBtn) oldBtn.remove();
-        const oldSaveBtn = document.getElementById('quick-save-template-btn');
-        if (oldSaveBtn) oldSaveBtn.remove();
-        const inputContainer = document.querySelector('.flex.justify-between.items-end.py-sm.px-1.gap-0');
-        if (!inputContainer) {
-            setTimeout(createTemplatesAccessButton, 500);
-            return;
-        }
-        const button = document.createElement('button');
-        button.id = 'templates-access-btn';
-        button.innerHTML = '📋';
-        button.title = 'Быстрые ответы';
-        button.style.cssText = `background: #4b5563; color: white; border: none; border-radius: 50%; width: 36px; height: 36px; cursor: pointer; font-size: 16px; margin-left: 5px; display: flex; align-items: center; justify-content: center;`;
-        button.addEventListener('click', (e) => {
-            e.stopPropagation();
-            toggleTemplatesPopup(button);
-        });
-
-        inputContainer.appendChild(button);
-    }
-
-    function toggleTemplatesPopup(button) {
-        let popup = document.getElementById('templates-popup');
-        if (popup) {
-            popup.remove();
-            return;
-        }
-        popup = document.createElement('div');
-        popup.id = 'templates-popup';
-        popup.style.cssText = `
-            position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-            width: 280px; max-height: 400px; display: flex; flex-direction: column;
-            background: #1f2937; border: 1px solid #4a5568; border-radius: 8px;
-            z-index: 10001; box-shadow: 0 10px 30px rgba(0,0,0,0.4); font-family: 'Inter', sans-serif;
-        `;
-
-        popup.innerHTML = `
-            <div id="templates-popup-header" style="padding: 8px 12px; background: #374151; color: white; font-weight: bold; border-bottom: 1px solid #4a5568; cursor: move; border-radius: 8px 8px 0 0;">
-                Быстрые ответы
-            </div>
-            <div id="templates-popup-content" style="overflow-y: auto; flex: 1;"></div>
-        `;
-
-        const contentContainer = popup.querySelector('#templates-popup-content');
-
-        const createItem = (node, isSubmenu = false) => {
-            const item = document.createElement('div');
-            item.style.cssText = `padding: 10px 12px; color: white; font-size: 13px; cursor: pointer; border-bottom: 1px solid #4a5568;`;
-
-            if (node.type === 'template') {
-                item.textContent = node.title;
-                item.title = node.content;
-                item.addEventListener('mouseenter', () => item.style.backgroundColor = '#4a5568');
-                item.addEventListener('mouseleave', () => item.style.backgroundColor = 'transparent');
-                item.addEventListener('click', () => {
-                    const buttonContainer = document.querySelector('.flex.justify-between.items-end.py-sm.px-1.gap-0');
-                    if (!buttonContainer) {
-                        showToast('Не удалось найти контейнер поля ввода', 'error');
-                        popup.remove(); return;
-                    }
-                    const textarea = buttonContainer.querySelector('textarea');
-                    if (textarea) {
-                        const start = textarea.selectionStart;
-                        const end = textarea.selectionEnd;
-                        const text = textarea.value;
-                        const newText = text.substring(0, start) + node.content + text.substring(end);
-                        textarea.value = newText;
-                        textarea.selectionStart = textarea.selectionEnd = start + node.content.length;
-                        textarea.dispatchEvent(new Event('input', { bubbles: true }));
-                        textarea.focus();
-                    } else {
-                        showToast('Не удалось найти поле ввода', 'error');
-                    }
-                    popup.remove();
-                });
-            } else if (node.type === 'folder') {
-                item.textContent = `📁 ${node.title} ▸`;
-                item.style.position = 'relative';
-
-                const submenu = document.createElement('div');
-                submenu.style.cssText = `
-                    display: none; position: absolute; width: 250px;
-                    background: #1f2937; border: 1px solid #4a5568; border-radius: 8px;
-                    z-index: 10002; box-shadow: 5px 5px 15px rgba(0,0,0,0.3);
-                `;
-
-                if (node.children && node.children.length > 0) {
-                    node.children.forEach(child => submenu.appendChild(createItem(child, true)));
-                } else {
-                    submenu.innerHTML = `<div style="padding: 10px 12px; color: #6b7280; font-size: 12px;">Пусто</div>`;
-                }
-                item.appendChild(submenu);
-
-                item.addEventListener('mouseenter', () => {
-                    submenu.style.display = 'block';
-                    const rect = item.getBoundingClientRect();
-                    const subRect = submenu.getBoundingClientRect();
-
-                    let top = rect.top;
-                    let left = rect.right;
-
-                    if (left + subRect.width > window.innerWidth) {
-                        left = rect.left - subRect.width;
-                    }
-                    if (top + subRect.height > window.innerHeight) {
-                        top = window.innerHeight - subRect.height;
-                    }
-
-                    submenu.style.position = 'fixed';
-                    submenu.style.top = `${top}px`;
-                    submenu.style.left = `${left}px`;
-                });
-
-                item.addEventListener('mouseleave', () => {
-                    submenu.style.display = 'none';
-                });
-            }
-            return item;
-        };
-
-        const addSection = (title, templates) => {
-            const sectionWrapper = document.createElement('div');
-            const titleEl = document.createElement('h5');
-            titleEl.style.cssText = `padding: 8px 12px 4px; margin: 0; color: #9ca3af; font-size: 11px; font-weight: 600; text-transform: uppercase; background: #1f2937; position: sticky; top: 0;`;
-            titleEl.textContent = title;
-            sectionWrapper.appendChild(titleEl);
-
-            if (templates.length === 0) {
-                const emptyEl = document.createElement('div');
-                emptyEl.style.cssText = `padding: 10px 12px; color: #6b7280; font-size: 12px;`;
-                emptyEl.textContent = 'Пусто';
-                sectionWrapper.appendChild(emptyEl);
-            } else {
-                templates.forEach(node => {
-                    sectionWrapper.appendChild(createItem(node));
-                });
-            }
-            contentContainer.appendChild(sectionWrapper);
-        };
-
-        const profileTemplates = (currentProfileName !== 'Профиль не выбран' && currentSettings.templates) ? currentSettings.templates : [];
-
-        if (globalTemplates.length === 0 && profileTemplates.length === 0) {
-            contentContainer.innerHTML = `<div style="padding: 12px; text-align: center; color: #9ca3af; font-size: 13px;">Нет шаблонов.</div>`;
-        } else {
-            addSection('🌐 Общие', globalTemplates);
-            if (currentProfileName !== 'Профиль не выбран') {
-                addSection(`👤 ${currentProfileName}`, profileTemplates);
-            }
-        }
-
-        document.body.appendChild(popup);
-        applyModalPosition(popup);
-        makeDraggable(popup, popup.querySelector('#templates-popup-header'));
-
-        const closePopup = (e) => {
-            if (!popup.contains(e.target) && e.target.id !== 'templates-access-btn') {
-                popup.remove();
-                document.removeEventListener('click', closePopup);
-            }
-        };
-        setTimeout(() => document.addEventListener('click', closePopup), 0);
-    }
-
-    // === БЫСТРОЕ СОХРАНЕНИЕ ШАБЛОНА ===
-    function openQuickSaveModal(content) {
-        if (!content || content.trim() === '') {
-            showToast('Нечего сохранять', 'info');
-            return;
-        }
-
-        let modal = document.getElementById('quick-save-modal');
-        if (modal) modal.remove();
-
-        modal = document.createElement('div');
-        modal.id = 'quick-save-modal';
-        modal.style.cssText = `
-            position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-            z-index: 10003; font-family: 'Inter', sans-serif;
-        `;
-
-        const defaultTitle = content.substring(0, 30).replace(/\n/g, ' ') + (content.length > 30 ? '...' : '');
-
-        modal.innerHTML = `
-            <div style="background: #2d3748; padding: 20px; border-radius: 10px; width: 400px; color: white; box-shadow: 0 20px 60px rgba(0,0,0,0.5);">
-                <h3 style="margin-top:0; text-align:center;">Быстрое сохранение шаблона</h3>
-                <input type="text" id="quick-save-title" value="${defaultTitle}" style="width: 100%; padding: 8px; margin: 10px 0; border-radius: 5px; background: #1a202c; color: white; border:1px solid #4a5568;" placeholder="Название шаблона">
-                <textarea id="quick-save-content" readonly style="width: 100%; height: 100px; padding: 8px; margin-bottom: 10px; border-radius: 5px; background: #1a202c; color: #9ca3af; border:1px solid #4a5568; resize: none;">${content}</textarea>
-                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 8px; background: rgba(255,255,255,0.05); border-radius: 5px; margin-bottom: 15px;" title="Если включено, шаблон будет виден только в текущем профиле">
-                    <input type="checkbox" id="quick-save-is-profile" style="width: 15px; height: 15px; cursor: pointer;">
-                    <span style="color: white; font-size: 12px; font-weight: 600;">Привязать к текущему профилю</span>
-                </label>
-                <div style="display: flex; gap: 10px;">
-                    <button id="quick-save-btn" style="flex:1; padding: 8px; background: #10b981; color: white; border: none; border-radius: 5px; cursor: pointer;">Сохранить</button>
-                    <button id="quick-cancel-btn" style="flex:1; padding: 8px; background: #4a5568; color: white; border: none; border-radius: 5px; cursor: pointer;">Отмена</button>
-                </div>
-            </div>
-        `;
-
-        document.body.appendChild(modal);
-
-        const isProfileSelected = currentProfileName !== 'Профиль не выбран';
-        const checkbox = modal.querySelector('#quick-save-is-profile');
-        if (!isProfileSelected) {
-            checkbox.disabled = true;
-            checkbox.parentElement.style.opacity = '0.5';
-            checkbox.parentElement.title = 'Выберите профиль для использования этой опции';
-        }
-
-        modal.querySelector('#quick-cancel-btn').onclick = () => modal.remove();
-        modal.querySelector('#quick-save-btn').onclick = () => {
-            const title = modal.querySelector('#quick-save-title').value.trim();
-            const isProfileSpecific = checkbox.checked;
-
-            if (!title) {
-                showToast('Название не может быть пустым', 'error');
-                return;
-            }
-
-            const newTemplate = { id: generateId(), type: 'template', title, content };
-
-            if (isProfileSpecific) {
-                currentSettings.templates.push(newTemplate);
-                saveProfiles();
-                showToast(`Шаблон "${title}" сохранен в профиль`, 'success');
-            } else {
-                globalTemplates.push(newTemplate);
-                saveGlobalTemplates();
-                showToast(`Общий шаблон "${title}" сохранен`, 'success');
-            }
-
-            if (document.getElementById('templates-modal')?.style.display === 'flex') {
-                renderTemplatesList();
-            }
-            const popup = document.getElementById('templates-popup');
-            if(popup) popup.remove();
-
-            modal.remove();
-        };
-    }
-
-    function addSaveTemplateButtonsToMessages() {
-        const messages = document.querySelectorAll('div.w-full.flex.mb-lg .leading-6');
-        messages.forEach(msgContent => {
-            const parentBubble = msgContent.parentElement;
-            if (!parentBubble || parentBubble.querySelector('.quick-save-from-chat-btn')) {
-                return; // Already has a button or can't find parent
-            }
-
-            if (getComputedStyle(parentBubble).position === 'static') {
-                parentBubble.style.position = 'relative';
-            }
-
-            const saveBtn = document.createElement('button');
-            saveBtn.innerHTML = '💾';
-            saveBtn.title = 'Сохранить как шаблон';
-            saveBtn.className = 'quick-save-from-chat-btn';
-            saveBtn.style.cssText = `
-                position: absolute; top: 5px; right: 5px;
-                background: rgba(16, 185, 129, 0.8); color: white; border: none;
-                border-radius: 5px; width: 28px; height: 28px;
-                cursor: pointer; font-size: 14px; opacity: 0;
-                transition: opacity 0.2s; z-index: 10;
-            `;
-
-            parentBubble.addEventListener('mouseenter', () => saveBtn.style.opacity = '1');
-            parentBubble.addEventListener('mouseleave', () => saveBtn.style.opacity = '0');
-
-            saveBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const clone = msgContent.cloneNode(true);
-                clone.querySelectorAll('.quick-save-from-chat-btn').forEach(el => el.remove());
-                const textToSave = clone.innerText.trim();
-                openQuickSaveModal(textToSave);
-            });
-            parentBubble.appendChild(saveBtn);
         });
     }
 
@@ -2238,7 +1324,6 @@
                     background-attachment: fixed !important;
                     background-repeat: ${currentSettings.backgroundRepeat || 'no-repeat'} !important;
                     background-color: #111827 !important;
-                    filter: brightness(${currentSettings.backgroundBrightness}%) contrast(${currentSettings.backgroundContrast}%) saturate(${currentSettings.backgroundSaturation}%) !important;
                 }
                 .flex.justify-undefined.items-undefined.w-full.bg-gray-2.py-0.px-2.z-\\[2\\].items-center.flex-col,
                 .flex.justify-undefined.items-undefined.w-full.bg-gray-2,
@@ -2261,26 +1346,14 @@
             const userRgb = hexToRgb(currentSettings.userMsgColor);
             const inputRgb = hexToRgb(currentSettings.inputBgColor);
 
-            let botBg, userBg;
-            if (currentSettings.useGradient) {
-                 const botRgb2 = hexToRgb(currentSettings.botMsgColor2);
-                 const userRgb2 = hexToRgb(currentSettings.userMsgColor2);
-                 const angle = currentSettings.gradientAngle;
-                 botBg = `linear-gradient(${angle}deg, rgba(${botRgb.r}, ${botRgb.g}, ${botRgb.b}, ${alpha}), rgba(${botRgb2.r}, ${botRgb2.g}, ${botRgb2.b}, ${alpha}))`;
-                 userBg = `linear-gradient(${angle}deg, rgba(${userRgb.r}, ${userRgb.g}, ${userRgb.b}, ${alpha}), rgba(${userRgb2.r}, ${userRgb2.g}, ${userRgb2.b}, ${alpha}))`;
-            } else {
-                 botBg = `rgba(${botRgb.r}, ${botRgb.g}, ${botRgb.b}, ${alpha})`;
-                 userBg = `rgba(${userRgb.r}, ${userRgb.g}, ${userRgb.b}, ${alpha})`;
-            }
+            const botBg = `rgba(${botRgb.r}, ${botRgb.g}, ${botRgb.b}, ${alpha})`;
+            const userBg = `rgba(${userRgb.r}, ${userRgb.g}, ${userRgb.b}, ${alpha})`;
             const inputBg = `rgba(${inputRgb.r}, ${inputRgb.g}, ${inputRgb.b}, ${alpha})`;
-
-            const botProp = currentSettings.useGradient ? 'background-image' : 'background-color';
-            const userProp = currentSettings.useGradient ? 'background-image' : 'background-color';
 
             // Сообщения бота (исключая поле ввода)
             css += `
                 .bg-gray-4:not(.w-full.border-1), .bg-gray-3:not(.w-full.border-1) {
-                    ${botProp}: ${botBg} !important; ${commonProps}
+                    background-color: ${botBg} !important; ${commonProps}
                 }
                 .bg-gray-4:not(.w-full.border-1), .bg-gray-3:not(.w-full.border-1),
                 .bg-gray-4:not(.w-full.border-1) *, .bg-gray-3:not(.w-full.border-1) * {
@@ -2292,7 +1365,7 @@
                 }
 
                 .bg-blumine-6, .bg-accent-blue, .dark\\:bg-blumine-3 {
-                    ${userProp}: ${userBg} !important; ${commonProps}
+                    background-color: ${userBg} !important; ${commonProps}
                 }
                 .bg-blumine-6, .bg-accent-blue, .bg-blumine-6 *, .bg-accent-blue * {
                     color: ${currentSettings.userTextColor} !important;
@@ -2323,10 +1396,15 @@
         const align = currentSettings.messageAlign;
         const fontName = currentSettings.customFontName || currentSettings.fontFamily;
         css += `
-            div.mb-lg.bg-transparent span.leading-6, div.mb-lg.bg-transparent em, div.mb-lg.bg-transparent i,
+            div.mb-lg.bg-transparent span.leading-6, div.mb-lg.bg-transparent p, div.mb-lg.bg-transparent em, div.mb-lg.bg-transparent i,
             div.mb-lg.bg-transparent strong, div.mb-lg.bg-transparent b, div.mb-lg.bg-transparent u {
-                font-size: ${newFontSize}px !important; font-family: '${fontName}', sans-serif !important;
-                line-height: 1.5 !important; text-align: ${align} !important;
+                font-size: ${newFontSize}px !important;
+                font-family: '${fontName}', sans-serif !important;
+                font-weight: ${currentSettings.fontWeight} !important;
+                line-height: ${currentSettings.lineHeight}% !important;
+                letter-spacing: ${currentSettings.letterSpacing}px !important;
+                text-transform: ${currentSettings.textTransform} !important;
+                text-align: ${align} !important;
             }
         `;
 
@@ -2401,15 +1479,14 @@
     }
 
     function generateExportHTML() {
-        const messageContainer = document.querySelector('.overflow-auto.custom-scroll');
-        if (!messageContainer) return null;
-
-        let messages = messageContainer.querySelectorAll('div[class*="w-full flex mb-lg"]');
+        let messages = document.querySelectorAll('div.w-full.flex.mb-lg');
+        if (messages.length === 0) messages = document.querySelectorAll('.flex.flex-col.gap-md > div.flex.w-full');
         if (messages.length === 0) return null;
 
+        const headerSelector = '.flex.flex-col.justify-undefined.items-undefined.py-md.pt-lg.px-lg.max-mob\\:px-0.gap-sm.items-center.w-full';
         let headerHTML = '<h1 style="text-align:center; color:white;">SpicyChat Export</h1>';
-        const headerContainer = document.querySelector('header > div.flex.items-center');
-         if (headerContainer) {
+        const headerContainer = document.querySelector(headerSelector);
+        if (headerContainer) {
             const cloneHeader = headerContainer.cloneNode(true);
             const smallImg = cloneHeader.querySelector('img[width="80"]');
             if (smallImg) {
@@ -2420,9 +1497,9 @@
         }
 
         let botColor = '#1f2937'; let userColor = '#2563eb';
-        const botMsgSample = document.querySelector('div[class*="w-full flex mb-lg"]:not(.flex-row-reverse) .bg-gray-3');
+        const botMsgSample = document.querySelector('div.w-full.flex.mb-lg:not(.flex-row-reverse) .bg-gray-3');
         if (botMsgSample) botColor = window.getComputedStyle(botMsgSample).backgroundColor;
-        const userMsgSample = document.querySelector('div[class*="w-full flex mb-lg"].flex-row-reverse .bg-accent-blue');
+        const userMsgSample = document.querySelector('div.w-full.flex.mb-lg.flex-row-reverse .bg-accent-blue');
         if (userMsgSample) userColor = window.getComputedStyle(userMsgSample).backgroundColor;
 
         let html = `<!DOCTYPE html><html lang="ru"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>SpicyChat Export</title><script src="https://cdn.tailwindcss.com"></script><style>body{font-family:'Inter',system-ui,sans-serif;background:#0f111a;color:#e5e7eb;padding:20px;margin:0;min-height:100vh;display:flex;flex-direction:column;align-items:center}.main-wrapper{width:100%;max-width:900px;margin:0 auto}.chat-container{display:flex;flex-direction:column;gap:20px;margin-top:40px}.message{display:flex;gap:15px;align-items:flex-start}.message.user{flex-direction:row-reverse}.avatar{width:40px;height:40px;border-radius:50%;object-fit:cover;background:#374151;flex-shrink:0}.content{max-width:80%}.name{font-weight:600;margin-bottom:4px;font-size:0.9em;color:#d1d5db}.message.user .name{text-align:right;display:none}.bubble{padding:12px 16px;border-radius:8px;line-height:1.6;position:relative;white-space:pre-wrap;font-size:15px}.message:not(.user) .bubble{background-color:${botColor};color:#d1d5db;border-top-left-radius:2px}.message.user .bubble{background-color:${userColor};color:white;border-top-right-radius:2px}a{color:#60a5fa;text-decoration:none}em{font-style:italic;opacity:0.9}</style></head><body><div class="main-wrapper"><div class="chat-header">${headerHTML}</div><div class="chat-container">`;
@@ -2437,10 +1514,10 @@
                 let cleanText = "";
                 if (contentDiv) {
                     const clone = contentDiv.cloneNode(true); clone.querySelectorAll('.text-xs, button, svg, .absolute').forEach(el => el.remove());
-                    cleanText = clone.innerHTML.trim().replace(/\s*\d+\s*\/\s*\d+\s*$/, '');
-                } else { cleanText = msg.innerHTML.trim(); }
+                    cleanText = clone.innerText.trim().replace(/\s*\d+\s*\/\s*\d+\s*$/, '');
+                } else { cleanText = msg.innerText.trim(); }
 
-                if (cleanText) { html += `<div class="message ${isUser ? 'user' : ''}"><img src="${avatarSrc}" class="avatar" alt="${name}"><div class="content"><div class="bubble">${cleanText}</div></div></div>`; }
+                if (cleanText) { html += `<div class="message ${isUser ? 'user' : ''}"><img src="${avatarSrc}" class="avatar" alt="${name}"><div class="content"><div class="bubble">${cleanText.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div></div></div>`; }
             } catch (e) { console.error(e); }
         });
         html += `</div></div></body></html>`; return html;
@@ -2548,10 +1625,6 @@ compactMode ? '14px' : '20px'}; border-bottom:1px solid rgba(255,255,255,0.15); 
                 <button id="btn-open-visual-settings" title="Визуальные настройки и фон" style="width:100%; padding:${compactMode ? '9px' : '12px'}; background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); color:white; border:none; border-radius:7px; cursor:pointer; font-weight:600; font-size:${compactMode ? '12px' : '14px'}; box-shadow: 0 4px 12px rgba(59,130,246,0.3);">
                     ${compactMode ? '🎨' : '🎨 Визуальные настройки'}
                 </button>
-
-                <button id="btn-open-templates" title="Шаблоны / Быстрые ответы" style="width:100%; padding:${compactMode ? '9px' : '12px'}; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); color:white; border:none; border-radius:7px; cursor:pointer; font-weight:600; font-size:${compactMode ? '12px' : '14px'}; box-shadow: 0 4px 12px rgba(245,158,11,0.3);">
-                    ${compactMode ? '📋' : '📋 Шаблоны'}
-                </button>
             </div>
 
             <div style="margin-top:${compactMode ? '12px' : '16px'}; padding-top:${compactMode ? '12px' : '15px'}; border-top:1px solid rgba(255,255,255,0.15);">
@@ -2571,7 +1644,6 @@ compactMode ? '14px' : '20px'}; border-bottom:1px solid rgba(255,255,255,0.15); 
     function setupPanelHandlers(panel) {
         panel.querySelector('#btn-open-text-settings').addEventListener('click', openTextSettingsModal);
         panel.querySelector('#btn-open-visual-settings').addEventListener('click', openVisualSettingsModal);
-        panel.querySelector('#btn-open-templates').addEventListener('click', openTemplatesModal);
 
         const updateProfilesList = () => {
             let options = '<option value="Профиль не выбран"' + (currentProfileName === 'Профиль не выбран' ? ' selected' : '') + '>Профиль не выбран</option>' + Object.keys(profiles).map(name => `<option value="${name}" ${currentProfileName === name ? 'selected' : ''}>${name}</option>`).join('');
@@ -2581,21 +1653,10 @@ compactMode ? '14px' : '20px'}; border-bottom:1px solid rgba(255,255,255,0.15); 
         panel.querySelector('#profile-select').addEventListener('change', (e) => {
             const name = e.target.value;
             currentProfileName = name;
-            const charId = getCharacterId();
-
             if (name !== 'Профиль не выбран' && profiles[name]) {
                 currentSettings = {...profiles[name]};
-                if (charId) {
-                    characterProfileMap[charId] = name;
-                    saveCharacterProfileMap();
-                    showToast(`Профиль "${name}" привязан к этому персонажу`, 'info');
-                }
             } else {
                 currentSettings = {...DEFAULT_SETTINGS};
-                if (charId) {
-                    delete characterProfileMap[charId];
-                    saveCharacterProfileMap();
-                }
             }
             saveProfiles();
             applyStyles();
@@ -2640,17 +1701,7 @@ compactMode ? '14px' : '20px'}; border-bottom:1px solid rgba(255,255,255,0.15); 
             if (currentProfileName === 'Профиль не выбран') {
                 showToast('Выберите профиль для удаления', 'error');
             } else if (confirm('Удалить профиль "' + currentProfileName + '"?')) {
-                const profileToDelete = currentProfileName;
-                delete profiles[profileToDelete];
-
-                // Update character profile map
-                Object.keys(characterProfileMap).forEach(charId => {
-                    if (characterProfileMap[charId] === profileToDelete) {
-                        delete characterProfileMap[charId];
-                    }
-                });
-                saveCharacterProfileMap();
-
+                delete profiles[currentProfileName];
                 currentProfileName = 'Профиль не выбран';
                 currentSettings = {...DEFAULT_SETTINGS};
                 updateProfilesList();
@@ -2751,25 +1802,33 @@ compactMode ? '14px' : '20px'}; border-bottom:1px solid rgba(255,255,255,0.15); 
                 const raw = JSON.parse(saved);
                 profiles = {};
                 Object.keys(raw).forEach(k => {
-                    profiles[safeDecode(k)] = mergeWithDefaults(raw[k]);
+                    const profile = raw[k];
+                    if (!profile.hasOwnProperty('googleFontsApiKey')) {
+                        profile.googleFontsApiKey = '';
+                    }
+                    if (!profile.hasOwnProperty('inputBgColor')) {
+                        profile.inputBgColor = '#374151';
+                    }
+                    profiles[safeDecode(k)] = profile;
                 });
             } else {
-                profiles = { 'Мой профиль': { ...DEFAULT_SETTINGS } };
+                profiles = { 'Мой профиль': {...DEFAULT_SETTINGS} };
             }
-
             currentProfileName = safeDecode(GM_getValue('spicychat_current_profile_v4', 'Профиль не выбран'));
-
             if (currentProfileName !== 'Профиль не выбран' && profiles[currentProfileName]) {
-                currentSettings = { ...profiles[currentProfileName] };
+                currentSettings = {...profiles[currentProfileName]};
+                if (!currentSettings.hasOwnProperty('googleFontsApiKey')) {
+                    currentSettings.googleFontsApiKey = '';
+                }
+                if (!currentSettings.hasOwnProperty('inputBgColor')) {
+                    currentSettings.inputBgColor = '#374151';
+                }
             } else {
-                currentProfileName = 'Профиль не выбран';
-                currentSettings = { ...DEFAULT_SETTINGS };
+                currentSettings = {...DEFAULT_SETTINGS};
             }
         } catch (e) {
             console.error('Load profiles error:', e);
-            profiles = { 'Мой профиль': { ...DEFAULT_SETTINGS } };
-            currentProfileName = 'Профиль не выбран';
-            currentSettings = { ...DEFAULT_SETTINGS };
+            currentSettings = {...DEFAULT_SETTINGS};
         }
     }
 
@@ -2801,42 +1860,14 @@ compactMode ? '14px' : '20px'}; border-bottom:1px solid rgba(255,255,255,0.15); 
         });
     }
 
-    function getCharacterId() {
-        const match = window.location.href.match(/chat\/character\/([a-f0-9-]+)/);
-        return match ? match[1] : null;
-    }
-
-    function switchProfileForCharacter() {
-        const charId = getCharacterId();
-        if (charId && characterProfileMap[charId]) {
-            const profileName = characterProfileMap[charId];
-            if (profiles[profileName] && currentProfileName !== profileName) {
-                currentProfileName = profileName;
-                currentSettings = { ...profiles[profileName] };
-                saveProfiles();
-                applyStyles();
-                updatePanelUI();
-                showToast(`Профиль "${profileName}" применен`, 'info');
-            }
-        }
-    }
-
     function init() {
-        runTemplateMigration();
         loadProfiles();
         loadFavoriteFonts();
-        loadGlobalTemplates();
-        runTemplateStructureMigration();
         loadModalPositions();
-        loadCharacterProfileMap();
 
         compactMode = GM_getValue('spicychat_compact_mode', false);
 
-        if (isChatPage()) {
-            createButtons();
-            createTemplatesAccessButton();
-            switchProfileForCharacter();
-        }
+        createButtons();
         applyStyles();
         setupHotkeys();
 
@@ -2845,25 +1876,18 @@ compactMode ? '14px' : '20px'}; border-bottom:1px solid rgba(255,255,255,0.15); 
                 lastUrl = window.location.href;
                 if (isChatPage()) {
                     if(!document.getElementById('spicychat-editor-button')) createButtons();
-                    switchProfileForCharacter();
                     applyStyles();
-                    createTemplatesAccessButton();
-                } else {
+                }
+                else {
                     const btn = document.getElementById('spicychat-editor-button');
                     if(btn) btn.remove();
                     const btnCin = document.getElementById('spicychat-cinema-button');
                     if(btnCin) btnCin.remove();
                     if(styleElement) styleElement.textContent = '';
                 }
-            } else {
-                if(isChatPage() && !document.getElementById('templates-access-btn')) {
-                    createTemplatesAccessButton();
-                }
             }
-            addSaveTemplateButtonsToMessages();
         });
         observer.observe(document.body, { childList: true, subtree: true });
-        addSaveTemplateButtonsToMessages();
     }
 
     if (document.readyState === 'loading') {
