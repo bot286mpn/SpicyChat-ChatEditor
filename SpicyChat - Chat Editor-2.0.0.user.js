@@ -1833,7 +1833,7 @@
                 return;
             }
 
-            const newTemplate = { title, content };
+            const newTemplate = { id: generateId(), type: 'template', title, content };
 
             if (isProfileSpecific) {
                 currentSettings.templates.push(newTemplate);
