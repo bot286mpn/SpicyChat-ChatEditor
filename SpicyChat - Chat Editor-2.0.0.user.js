@@ -33,6 +33,7 @@
     let lastUrl = window.location.href;
     let hideButtonTimeout = null;
     let favoriteFonts = [];
+    let chatTemplates = [];
     let compactMode = false;
     let modalPositions = {};
 
@@ -101,7 +102,14 @@
         userItalicColor: '#bfdbfe',
         inputBgColor: '#374151',
         cinemaMode: false,
-        googleFontsApiKey: ''
+        googleFontsApiKey: '',
+        backgroundBrightness: 100,
+        backgroundContrast: 100,
+        backgroundSaturation: 100,
+        useGradient: false,
+        botMsgColor2: '#1f2937',
+        userMsgColor2: '#1e40af',
+        gradientAngle: 90
     };
 
     function safeEncode(str) { try { return encodeURIComponent(str); } catch (e) { return str; } }
@@ -362,6 +370,23 @@
         const saved = GM_getValue('spicychat_favorite_fonts', null);
         if (saved) {
             favoriteFonts = JSON.parse(saved);
+        }
+    }
+
+    // === ШАБЛОНЫ / БЫСТРЫЕ ОТВЕТЫ ===
+    function saveChatTemplates() {
+        GM_setValue('spicychat_chat_templates', JSON.stringify(chatTemplates));
+    }
+
+    function loadChatTemplates() {
+        const saved = GM_getValue('spicychat_chat_templates', null);
+        if (saved) {
+            chatTemplates = JSON.parse(saved);
+        } else {
+            chatTemplates = [
+                { title: 'Пример действия', content: '*Смотрит на вас с интересом*' },
+                { title: 'Пример OOC', content: '((Я сейчас отойду на пару минут))' }
+            ];
         }
     }
 
@@ -980,7 +1005,7 @@
                             <input type="file" id="visual-file-upload" accept="image/*" style="display: none;">
                         </div>
 
-                        <div style="display: flex; gap: 6px;">
+                        <div style="display: flex; gap: 6px; margin-bottom: 10px;">
                             <div style="flex: 1;">
                                 <label style="display: block; color: #9ca3af; font-size: 9px; margin-bottom: 3px;" title="Как изображение заполняет фон">Размер:</label>
                                 <select id="visual-background-size" title="Размер фона" style="width: 100%; padding: 5px; background: #374151; color: white; border: 1px solid #4b5563; border-radius: 4px; font-size: 10px;">
@@ -997,6 +1022,12 @@
                                 </select>
                             </div>
                         </div>
+                        <div style="background: rgba(0,0,0,0.2); padding: 8px; border-radius: 5px;">
+                            <div style="color: #9ca3af; font-size: 10px; margin-bottom: 5px; font-weight: 600; text-align: center;">Фильтры фона</div>
+                             ${createSlider('backgroundBrightness', '🔆 Яркость', 0, 200, currentSettings.backgroundBrightness, '%', 'Яркость фона (0-200%)')}
+                             ${createSlider('backgroundContrast', '🌗 Контраст', 0, 200, currentSettings.backgroundContrast, '%', 'Контраст фона (0-200%)')}
+                             ${createSlider('backgroundSaturation', '🎨 Насыщенность', 0, 200, currentSettings.backgroundSaturation, '%', 'Насыщенность фона (0-200%)')}
+                        </div>
                     </div>
 
                     <!-- Цвета -->
@@ -1007,17 +1038,24 @@
                         </label>
 
                         <div id="visual-colors-container" style="${currentSettings.useCustomColors ? '' : 'opacity:0.4; pointer-events:none;'}">
+                             <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; margin-bottom: 8px; padding: 5px; background: rgba(255,255,255,0.05); border-radius: 5px;" title="Использовать градиент вместо сплошного цвета">
+                                <input type="checkbox" id="visual-use-gradient" ${currentSettings.useGradient ? 'checked' : ''} style="width: 14px; height: 14px; cursor: pointer;">
+                                <span style="color: white; font-size: 11px; font-weight: 600;">Gradients</span>
+                            </label>
+                            ${createSlider('gradientAngle', '↔️ Угол', 0, 360, currentSettings.gradientAngle, '°', 'Угол градиента')}
                             <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:10px;">
                                 <div style="background: rgba(0,0,0,0.2); padding: 6px; border-radius: 5px;">
                                     <div style="color: #9ca3af; font-size: 10px; margin-bottom: 5px; font-weight: 600; text-align: center;">🤖 БОТ</div>
-                                    ${createColorInput('visual-bot-msg-color', 'Фон', currentSettings.botMsgColor)}
+                                    ${createColorInput('visual-bot-msg-color', 'Цвет 1', currentSettings.botMsgColor)}
+                                    ${createColorInput('visual-bot-msg-color-2', 'Цвет 2', currentSettings.botMsgColor2)}
                                     ${createColorInput('visual-bot-text-color', 'Текст', currentSettings.botTextColor)}
                                     ${createColorInput('visual-bot-italic-color', 'Курсив', currentSettings.botItalicColor)}
                                 </div>
 
                                 <div style="background: rgba(0,0,0,0.2); padding: 6px; border-radius: 5px;">
                                     <div style="color: #9ca3af; font-size: 10px; margin-bottom: 5px; font-weight: 600; text-align: center;">👤 ВЫ</div>
-                                    ${createColorInput('visual-user-msg-color', 'Фон', currentSettings.userMsgColor)}
+                                    ${createColorInput('visual-user-msg-color', 'Цвет 1', currentSettings.userMsgColor)}
+                                    ${createColorInput('visual-user-msg-color-2', 'Цвет 2', currentSettings.userMsgColor2)}
                                     ${createColorInput('visual-user-text-color', 'Текст', currentSettings.userTextColor)}
                                     ${createColorInput('visual-user-italic-color', 'Курсив', currentSettings.userItalicColor)}
                                 </div>
@@ -1071,6 +1109,10 @@
         bindSlider('chatWidth', 'chatWidth');
         bindSlider('inputWidth', 'inputWidth');
         bindSlider('inputHeight', 'inputHeight');
+        bindSlider('backgroundBrightness', 'backgroundBrightness');
+        bindSlider('backgroundContrast', 'backgroundContrast');
+        bindSlider('backgroundSaturation', 'backgroundSaturation');
+        bindSlider('gradientAngle', 'gradientAngle');
 
         modal.querySelector('#visual-header-avatar-size').addEventListener('change', (e) => {
             currentSettings.headerAvatarSize = e.target.value;
@@ -1141,12 +1183,20 @@
             });
         };
 
+        modal.querySelector('#visual-use-gradient').addEventListener('change', (e) => {
+            currentSettings.useGradient = e.target.checked;
+            applyStyles();
+            saveProfiles();
+        });
+
         bindColor('visual-bot-msg-color', 'botMsgColor');
         bindColor('visual-bot-text-color', 'botTextColor');
         bindColor('visual-bot-italic-color', 'botItalicColor');
+        bindColor('visual-bot-msg-color-2', 'botMsgColor2');
         bindColor('visual-user-msg-color', 'userMsgColor');
         bindColor('visual-user-text-color', 'userTextColor');
         bindColor('visual-user-italic-color', 'userItalicColor');
+        bindColor('visual-user-msg-color-2', 'userMsgColor2');
         bindColor('visual-input-bg-color', 'inputBgColor');
 
         updateVisualSettingsUI();
@@ -1156,7 +1206,7 @@
         const modal = document.getElementById('visual-settings-modal');
         if (!modal) return;
 
-        ['chatOpacity', 'blurAmount', 'bubbleRadius', 'chatWidth', 'inputWidth', 'inputHeight'].forEach(k => {
+        ['chatOpacity', 'blurAmount', 'bubbleRadius', 'chatWidth', 'inputWidth', 'inputHeight', 'backgroundBrightness', 'backgroundContrast', 'backgroundSaturation', 'gradientAngle'].forEach(k => {
             const slider = modal.querySelector(`#visual-slider-${k}`);
             const input = modal.querySelector(`#visual-input-${k}`);
             if (slider) slider.value = currentSettings[k];
@@ -1175,13 +1225,153 @@
         modal.querySelector('#visual-colors-container').style.opacity = currentSettings.useCustomColors ? '1' : '0.4';
         modal.querySelector('#visual-colors-container').style.pointerEvents = currentSettings.useCustomColors ? 'auto' : 'none';
 
+        modal.querySelector('#visual-use-gradient').checked = currentSettings.useGradient;
+
         modal.querySelector('#visual-bot-msg-color').value = currentSettings.botMsgColor;
+        modal.querySelector('#visual-bot-msg-color-2').value = currentSettings.botMsgColor2;
         modal.querySelector('#visual-bot-text-color').value = currentSettings.botTextColor;
         modal.querySelector('#visual-bot-italic-color').value = currentSettings.botItalicColor;
         modal.querySelector('#visual-user-msg-color').value = currentSettings.userMsgColor;
+        modal.querySelector('#visual-user-msg-color-2').value = currentSettings.userMsgColor2;
         modal.querySelector('#visual-user-text-color').value = currentSettings.userTextColor;
         modal.querySelector('#visual-user-italic-color').value = currentSettings.userItalicColor;
         modal.querySelector('#visual-input-bg-color').value = currentSettings.inputBgColor;
+    }
+
+    // === МОДАЛЬНОЕ ОКНО ШАБЛОНОВ ===
+    function openTemplatesModal() {
+        let modal = document.getElementById('templates-modal');
+        if (modal) {
+            modal.style.display = 'flex';
+            renderTemplatesList();
+            return;
+        }
+
+        modal = document.createElement('div');
+        modal.id = 'templates-modal';
+        modal.style.cssText = `
+            position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            z-index: 10002; display: flex; align-items: center; justify-content: center;
+            font-family: 'Inter', sans-serif;
+        `;
+
+        modal.innerHTML = `
+            <div style="background: #1f2937; border-radius: 8px; width: 600px; max-height: 90vh; display: flex; flex-direction: column; border: 1px solid rgba(255,255,255,0.15); box-shadow: 0 20px 60px rgba(0,0,0,0.5);">
+                <div id="templates-modal-header" style="padding: 12px 16px; border-bottom: 1px solid rgba(255,255,255,0.1); display: flex; justify-content: space-between; align-items: center; background: linear-gradient(135deg, #1f2937 0%, #374151 100%);">
+                    <h3 style="margin: 0; color: white; font-size: 16px; font-weight: 700;">📋 Шаблоны / Быстрые ответы</h3>
+                    <button id="close-templates-modal" title="Закрыть" style="background: rgba(255,255,255,0.1); border: none; color: white; font-size: 22px; cursor: pointer; padding: 0; width: 30px; height: 30px; border-radius: 5px;">×</button>
+                </div>
+
+                <div style="display: flex; flex: 1; overflow: hidden; min-height: 500px;">
+                    <div id="templates-list-container" style="width: 40%; border-right: 1px solid rgba(255,255,255,0.1); display: flex; flex-direction: column; background: #111827; overflow-y: auto;">
+                        <!-- Template list will be rendered here -->
+                    </div>
+
+                    <div style="width: 60%; padding: 16px; display: flex; flex-direction: column; gap: 12px;">
+                        <h4 id="template-editor-title" style="margin:0; color:white; font-size: 14px; font-weight:600;">Новый шаблон</h4>
+                        <input type="hidden" id="template-edit-index" value="-1">
+                        <input type="text" id="template-title-input" placeholder="Название шаблона" style="width: 100%; padding: 8px; background: #374151; color: white; border: 1px solid #4b5563; border-radius: 4px; font-size: 13px;">
+                        <textarea id="template-content-input" placeholder="Текст шаблона..." style="width: 100%; flex: 1; padding: 8px; background: #374151; color: white; border: 1px solid #4b5563; border-radius: 4px; font-size: 13px; resize: vertical;"></textarea>
+                        <div style="display:flex; gap: 10px;">
+                            <button id="save-template-btn" style="flex:1; padding: 9px; background: #10b981; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight:600;">Сохранить</button>
+                            <button id="clear-template-form-btn" style="padding: 9px; background: #4b5563; color: white; border: none; border-radius: 5px; cursor: pointer;">Очистить</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(modal);
+        applyModalPosition(modal);
+        makeDraggable(modal, modal.querySelector('#templates-modal-header'));
+
+        modal.querySelector('#close-templates-modal').addEventListener('click', () => modal.style.display = 'none');
+        modal.querySelector('#save-template-btn').addEventListener('click', saveTemplate);
+        modal.querySelector('#clear-template-form-btn').addEventListener('click', clearTemplateForm);
+
+        renderTemplatesList();
+    }
+
+    function renderTemplatesList() {
+        const container = document.getElementById('templates-list-container');
+        if (!container) return;
+        container.innerHTML = '';
+
+        chatTemplates.forEach((template, index) => {
+            const item = document.createElement('div');
+            item.style.cssText = `
+                padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,0.05);
+                display: flex; justify-content: space-between; align-items: center; cursor: pointer;
+            `;
+            item.innerHTML = `
+                <div style="color: white; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${template.title}</div>
+                <div style="display:flex; gap: 5px;">
+                    <button class="delete-template-btn" data-index="${index}" title="Удалить" style="background: #ef4444; border:none; color:white; border-radius:4px; width:22px; height:22px; font-size:12px;">🗑️</button>
+                </div>
+            `;
+            item.addEventListener('click', (e) => {
+                if (e.target.classList.contains('delete-template-btn')) return;
+                editTemplate(index);
+            });
+            item.querySelector('.delete-template-btn').addEventListener('click', () => deleteTemplate(index));
+            container.appendChild(item);
+        });
+    }
+
+    function saveTemplate() {
+        const titleInput = document.getElementById('template-title-input');
+        const contentInput = document.getElementById('template-content-input');
+        const indexInput = document.getElementById('template-edit-index');
+        const title = titleInput.value.trim();
+        const content = contentInput.value.trim();
+        const index = parseInt(indexInput.value);
+
+        if (!title || !content) {
+            showToast('Название и текст не могут быть пустыми', 'error');
+            return;
+        }
+
+        if (index === -1) {
+            chatTemplates.push({ title, content });
+            showToast('Шаблон добавлен', 'success');
+        } else {
+            chatTemplates[index] = { title, content };
+            showToast('Шаблон обновлен', 'success');
+        }
+
+        saveChatTemplates();
+        renderTemplatesList();
+        clearTemplateForm();
+        const popup = document.getElementById('templates-popup');
+        if(popup) popup.remove();
+    }
+
+    function editTemplate(index) {
+        const template = chatTemplates[index];
+        if (!template) return;
+        document.getElementById('template-editor-title').textContent = 'Редактирование';
+        document.getElementById('template-edit-index').value = index;
+        document.getElementById('template-title-input').value = template.title;
+        document.getElementById('template-content-input').value = template.content;
+    }
+
+    function deleteTemplate(index) {
+        if (confirm(`Удалить шаблон "${chatTemplates[index].title}"?`)) {
+            chatTemplates.splice(index, 1);
+            saveChatTemplates();
+            renderTemplatesList();
+            clearTemplateForm();
+            showToast('Шаблон удален', 'success');
+            const popup = document.getElementById('templates-popup');
+            if(popup) popup.remove();
+        }
+    }
+
+    function clearTemplateForm() {
+        document.getElementById('template-editor-title').textContent = 'Новый шаблон';
+        document.getElementById('template-edit-index').value = -1;
+        document.getElementById('template-title-input').value = '';
+        document.getElementById('template-content-input').value = '';
     }
 
     function uploadImageToCatbox(file, callback) {
@@ -1200,6 +1390,68 @@
             },
             onerror: function(err) { showToast("Ошибка соединения", 'error'); }
         });
+    }
+
+    function createTemplatesAccessButton() {
+        const oldBtn = document.getElementById('templates-access-btn');
+        if (oldBtn) oldBtn.remove();
+        const inputContainer = document.querySelector('.flex.justify-between.items-end.py-sm.px-1.gap-0');
+        if (!inputContainer) {
+            setTimeout(createTemplatesAccessButton, 500);
+            return;
+        }
+        const button = document.createElement('button');
+        button.id = 'templates-access-btn';
+        button.innerHTML = '📋';
+        button.title = 'Быстрые ответы';
+        button.style.cssText = `background: #4b5563; color: white; border: none; border-radius: 5px; width: 36px; height: 36px; cursor: pointer; font-size: 16px; margin-left: 5px;`;
+        button.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleTemplatesPopup(button);
+        });
+        inputContainer.appendChild(button);
+    }
+
+    function toggleTemplatesPopup(button) {
+        let popup = document.getElementById('templates-popup');
+        if (popup) {
+            popup.remove();
+            return;
+        }
+        popup = document.createElement('div');
+        popup.id = 'templates-popup';
+        popup.style.cssText = `position: absolute; bottom: 50px; right: 10px; width: 250px; max-height: 300px; overflow-y: auto; background: #2d3748; border: 1px solid #4a5568; border-radius: 8px; z-index: 10001; box-shadow: 0 10px 30px rgba(0,0,0,0.4);`;
+
+        if (chatTemplates.length === 0) {
+            popup.innerHTML = `<div style="padding: 12px; text-align: center; color: #9ca3af; font-size: 13px;">Нет шаблонов.</div>`;
+        } else {
+            chatTemplates.forEach(template => {
+                const item = document.createElement('div');
+                item.textContent = template.title;
+                item.title = template.content;
+                item.style.cssText = `padding: 10px 12px; color: white; font-size: 13px; cursor: pointer; border-bottom: 1px solid #4a5568;`;
+                item.addEventListener('mouseenter', () => item.style.backgroundColor = '#4a5568');
+                item.addEventListener('mouseleave', () => item.style.backgroundColor = 'transparent');
+                item.addEventListener('click', () => {
+                    const textarea = document.querySelector('textarea[placeholder*="Напишите сообщение"]');
+                    if (textarea) {
+                        textarea.value += template.content;
+                        textarea.dispatchEvent(new Event('input', { bubbles: true }));
+                        textarea.focus();
+                    }
+                    popup.remove();
+                });
+                popup.appendChild(item);
+            });
+        }
+        document.body.appendChild(popup);
+        const closePopup = (e) => {
+            if (!popup.contains(e.target)) {
+                popup.remove();
+                document.removeEventListener('click', closePopup);
+            }
+        };
+        setTimeout(() => document.addEventListener('click', closePopup), 0);
     }
 
     function applyStyles() {
@@ -1264,6 +1516,7 @@
                     background-attachment: fixed !important;
                     background-repeat: ${currentSettings.backgroundRepeat || 'no-repeat'} !important;
                     background-color: #111827 !important;
+                    filter: brightness(${currentSettings.backgroundBrightness}%) contrast(${currentSettings.backgroundContrast}%) saturate(${currentSettings.backgroundSaturation}%) !important;
                 }
                 .flex.justify-undefined.items-undefined.w-full.bg-gray-2.py-0.px-2.z-\\[2\\].items-center.flex-col,
                 .flex.justify-undefined.items-undefined.w-full.bg-gray-2,
@@ -1286,14 +1539,26 @@
             const userRgb = hexToRgb(currentSettings.userMsgColor);
             const inputRgb = hexToRgb(currentSettings.inputBgColor);
 
-            const botBg = `rgba(${botRgb.r}, ${botRgb.g}, ${botRgb.b}, ${alpha})`;
-            const userBg = `rgba(${userRgb.r}, ${userRgb.g}, ${userRgb.b}, ${alpha})`;
+            let botBg, userBg;
+            if (currentSettings.useGradient) {
+                 const botRgb2 = hexToRgb(currentSettings.botMsgColor2);
+                 const userRgb2 = hexToRgb(currentSettings.userMsgColor2);
+                 const angle = currentSettings.gradientAngle;
+                 botBg = `linear-gradient(${angle}deg, rgba(${botRgb.r}, ${botRgb.g}, ${botRgb.b}, ${alpha}), rgba(${botRgb2.r}, ${botRgb2.g}, ${botRgb2.b}, ${alpha}))`;
+                 userBg = `linear-gradient(${angle}deg, rgba(${userRgb.r}, ${userRgb.g}, ${userRgb.b}, ${alpha}), rgba(${userRgb2.r}, ${userRgb2.g}, ${userRgb2.b}, ${alpha}))`;
+            } else {
+                 botBg = `rgba(${botRgb.r}, ${botRgb.g}, ${botRgb.b}, ${alpha})`;
+                 userBg = `rgba(${userRgb.r}, ${userRgb.g}, ${userRgb.b}, ${alpha})`;
+            }
             const inputBg = `rgba(${inputRgb.r}, ${inputRgb.g}, ${inputRgb.b}, ${alpha})`;
+
+            const botProp = currentSettings.useGradient ? 'background-image' : 'background-color';
+            const userProp = currentSettings.useGradient ? 'background-image' : 'background-color';
 
             // Сообщения бота (исключая поле ввода)
             css += `
                 .bg-gray-4:not(.w-full.border-1), .bg-gray-3:not(.w-full.border-1) {
-                    background-color: ${botBg} !important; ${commonProps}
+                    ${botProp}: ${botBg} !important; ${commonProps}
                 }
                 .bg-gray-4:not(.w-full.border-1), .bg-gray-3:not(.w-full.border-1),
                 .bg-gray-4:not(.w-full.border-1) *, .bg-gray-3:not(.w-full.border-1) * {
@@ -1305,7 +1570,7 @@
                 }
 
                 .bg-blumine-6, .bg-accent-blue, .dark\\:bg-blumine-3 {
-                    background-color: ${userBg} !important; ${commonProps}
+                    ${userProp}: ${userBg} !important; ${commonProps}
                 }
                 .bg-blumine-6, .bg-accent-blue, .bg-blumine-6 *, .bg-accent-blue * {
                     color: ${currentSettings.userTextColor} !important;
@@ -1560,6 +1825,10 @@ compactMode ? '14px' : '20px'}; border-bottom:1px solid rgba(255,255,255,0.15); 
                 <button id="btn-open-visual-settings" title="Визуальные настройки и фон" style="width:100%; padding:${compactMode ? '9px' : '12px'}; background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); color:white; border:none; border-radius:7px; cursor:pointer; font-weight:600; font-size:${compactMode ? '12px' : '14px'}; box-shadow: 0 4px 12px rgba(59,130,246,0.3);">
                     ${compactMode ? '🎨' : '🎨 Визуальные настройки'}
                 </button>
+
+                <button id="btn-open-templates" title="Шаблоны / Быстрые ответы" style="width:100%; padding:${compactMode ? '9px' : '12px'}; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); color:white; border:none; border-radius:7px; cursor:pointer; font-weight:600; font-size:${compactMode ? '12px' : '14px'}; box-shadow: 0 4px 12px rgba(245,158,11,0.3);">
+                    ${compactMode ? '📋' : '📋 Шаблоны'}
+                </button>
             </div>
 
             <div style="margin-top:${compactMode ? '12px' : '16px'}; padding-top:${compactMode ? '12px' : '15px'}; border-top:1px solid rgba(255,255,255,0.15);">
@@ -1579,6 +1848,7 @@ compactMode ? '14px' : '20px'}; border-bottom:1px solid rgba(255,255,255,0.15); 
     function setupPanelHandlers(panel) {
         panel.querySelector('#btn-open-text-settings').addEventListener('click', openTextSettingsModal);
         panel.querySelector('#btn-open-visual-settings').addEventListener('click', openVisualSettingsModal);
+        panel.querySelector('#btn-open-templates').addEventListener('click', openTemplatesModal);
 
         const updateProfilesList = () => {
             let options = '<option value="Профиль не выбран"' + (currentProfileName === 'Профиль не выбран' ? ' selected' : '') + '>Профиль не выбран</option>' + Object.keys(profiles).map(name => `<option value="${name}" ${currentProfileName === name ? 'selected' : ''}>${name}</option>`).join('');
@@ -1738,12 +2008,13 @@ compactMode ? '14px' : '20px'}; border-bottom:1px solid rgba(255,255,255,0.15); 
                 profiles = {};
                 Object.keys(raw).forEach(k => {
                     const profile = raw[k];
-                    if (!profile.hasOwnProperty('googleFontsApiKey')) {
-                        profile.googleFontsApiKey = '';
-                    }
-                    if (!profile.hasOwnProperty('inputBgColor')) {
-                        profile.inputBgColor = '#374151';
-                    }
+                    // Применение значений по умолчанию для новых настроек к старым профилям
+                    const defaultKeys = Object.keys(DEFAULT_SETTINGS);
+                    defaultKeys.forEach(key => {
+                        if (!profile.hasOwnProperty(key)) {
+                            profile[key] = DEFAULT_SETTINGS[key];
+                        }
+                    });
                     profiles[safeDecode(k)] = profile;
                 });
             } else {
@@ -1752,12 +2023,11 @@ compactMode ? '14px' : '20px'}; border-bottom:1px solid rgba(255,255,255,0.15); 
             currentProfileName = safeDecode(GM_getValue('spicychat_current_profile_v4', 'Профиль не выбран'));
             if (currentProfileName !== 'Профиль не выбран' && profiles[currentProfileName]) {
                 currentSettings = {...profiles[currentProfileName]};
-                if (!currentSettings.hasOwnProperty('googleFontsApiKey')) {
-                    currentSettings.googleFontsApiKey = '';
-                }
-                if (!currentSettings.hasOwnProperty('inputBgColor')) {
-                    currentSettings.inputBgColor = '#374151';
-                }
+                 Object.keys(DEFAULT_SETTINGS).forEach(key => {
+                    if (!currentSettings.hasOwnProperty(key)) {
+                        currentSettings[key] = DEFAULT_SETTINGS[key];
+                    }
+                });
             } else {
                 currentSettings = {...DEFAULT_SETTINGS};
             }
@@ -1798,11 +2068,15 @@ compactMode ? '14px' : '20px'}; border-bottom:1px solid rgba(255,255,255,0.15); 
     function init() {
         loadProfiles();
         loadFavoriteFonts();
+        loadChatTemplates();
         loadModalPositions();
 
         compactMode = GM_getValue('spicychat_compact_mode', false);
 
-        createButtons();
+        if (isChatPage()) {
+            createButtons();
+            createTemplatesAccessButton();
+        }
         applyStyles();
         setupHotkeys();
 
@@ -1812,13 +2086,17 @@ compactMode ? '14px' : '20px'}; border-bottom:1px solid rgba(255,255,255,0.15); 
                 if (isChatPage()) {
                     if(!document.getElementById('spicychat-editor-button')) createButtons();
                     applyStyles();
-                }
-                else {
+                    createTemplatesAccessButton();
+                } else {
                     const btn = document.getElementById('spicychat-editor-button');
                     if(btn) btn.remove();
                     const btnCin = document.getElementById('spicychat-cinema-button');
                     if(btnCin) btnCin.remove();
                     if(styleElement) styleElement.textContent = '';
+                }
+            } else {
+                if(isChatPage() && !document.getElementById('templates-access-btn')) {
+                    createTemplatesAccessButton();
                 }
             }
         });
