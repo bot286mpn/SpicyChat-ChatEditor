@@ -35,6 +35,10 @@
     let favoriteFonts = [];
     let compactMode = false;
     let modalPositions = {};
+    let templates = {};
+    let isTemplatesModalOpen = false;
+    let isQuickTemplatesOpen = false;
+    let currentTemplateFolder = 'all';
 
     // Шрифты
     let systemFonts = [];
@@ -1262,6 +1266,313 @@
         });
     }
 
+    // === ШАБЛОНЫ ===
+    function saveTemplates() {
+        try {
+            GM_setValue('spicychat_templates', JSON.stringify(templates));
+        } catch (error) {
+            console.error('Ошибка сохранения шаблонов:', error);
+            showToast('Ошибка сохранения шаблонов', 'error');
+        }
+    }
+
+    function loadTemplates() {
+        const savedTemplates = GM_getValue('spicychat_templates', null);
+        if (savedTemplates) {
+            try {
+                templates = JSON.parse(savedTemplates);
+            } catch (e) {
+                templates = {};
+            }
+        } else {
+            templates = {};
+        }
+    }
+
+    function insertTextAtCursor(text) {
+        const textarea = document.querySelector('textarea');
+        if (textarea) {
+            const start = textarea.selectionStart;
+            const end = textarea.selectionEnd;
+            const textBefore = textarea.value.substring(0, start);
+            const textAfter = textarea.value.substring(end, textarea.value.length);
+            textarea.value = textBefore + text + textAfter;
+            textarea.selectionStart = textarea.selectionEnd = start + text.length;
+            textarea.focus();
+            const inputEvent = new Event('input', { bubbles: true });
+            textarea.dispatchEvent(inputEvent);
+        }
+    }
+
+    function openTemplatesModal() {
+        if (isTemplatesModalOpen) {
+            const existingModal = document.getElementById('templates-modal');
+            if (existingModal) existingModal.style.display = 'block';
+            return;
+        }
+
+        const modal = document.createElement('div');
+        modal.id = 'templates-modal';
+        modal.style.cssText = `
+            position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            z-index: 10002; background: #1f2937; border-radius: 8px; width: 700px;
+            max-height: 80vh; display: flex; flex-direction: column; color: white;
+            font-family: 'Inter', sans-serif; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            border: 1px solid rgba(255,255,255,0.1);
+        `;
+
+        modal.innerHTML = `
+            <div id="templates-modal-header" style="padding: 12px 16px; border-bottom: 1px solid #4b5563; display: flex; justify-content: space-between; align-items: center; cursor: move;">
+                <h3 style="margin: 0; font-size: 16px;">📜 Редактор шаблонов</h3>
+                <button id="close-templates-modal" style="background: none; border: none; color: white; font-size: 20px; cursor: pointer;">×</button>
+            </div>
+            <div style="display: flex; flex: 1; min-height: 0;">
+                <div id="templates-list-container" style="width: 250px; border-right: 1px solid #4b5563; padding: 10px; overflow-y: auto;">
+                    <!-- Список шаблонов будет здесь -->
+                </div>
+                <div style="flex: 1; display: flex; flex-direction: column; padding: 10px;">
+                    <input type="text" id="template-name" placeholder="Название шаблона" style="padding: 8px; background: #374151; border: 1px solid #4b5563; border-radius: 4px; margin-bottom: 10px;">
+                    <input type="text" id="template-folder" placeholder="Папка (необязательно)" style="padding: 8px; background: #374151; border: 1px solid #4b5563; border-radius: 4px; margin-bottom: 10px;">
+                    <textarea id="template-content" style="flex: 1; width: 100%; padding: 8px; background: #374151; border: 1px solid #4b5563; border-radius: 4px; resize: none; margin-bottom: 10px;"></textarea>
+                    <div style="display: flex; justify-content: flex-end; gap: 10px;">
+                        <button id="save-template" style="background: #10b981; border: none; border-radius: 4px; padding: 8px 12px; cursor: pointer;">Сохранить</button>
+                        <button id="delete-template" style="background: #ef4444; border: none; border-radius: 4px; padding: 8px 12px; cursor: pointer;">Удалить</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+        makeDraggable(modal, modal.querySelector('#templates-modal-header'));
+
+        let currentEditingId = null;
+
+        const nameInput = modal.querySelector('#template-name');
+        const folderInput = modal.querySelector('#template-folder');
+        const contentInput = modal.querySelector('#template-content');
+
+        const clearFields = () => {
+            nameInput.value = '';
+            folderInput.value = '';
+            contentInput.value = '';
+            currentEditingId = null;
+            modal.querySelector('#delete-template').style.display = 'none';
+        };
+
+        const renderTemplatesList = () => {
+            const container = modal.querySelector('#templates-list-container');
+            container.innerHTML = '';
+
+            const folders = {};
+            Object.values(templates).forEach(t => {
+                const folderName = t.folder || 'Без папки';
+                if (!folders[folderName]) folders[folderName] = [];
+                folders[folderName].push(t);
+            });
+
+            const sortedFolders = Object.keys(folders).sort();
+
+            sortedFolders.forEach(folderName => {
+                const details = document.createElement('details');
+                details.open = true;
+                const summary = document.createElement('summary');
+                summary.textContent = folderName;
+                summary.style.cssText = `font-weight: bold; cursor: pointer; padding: 5px; margin-bottom: 5px;`;
+                details.appendChild(summary);
+
+                folders[folderName].sort((a, b) => a.name.localeCompare(b.name)).forEach(template => {
+                    const item = document.createElement('div');
+                    item.textContent = template.name;
+                    item.style.cssText = 'padding: 5px 10px; cursor: pointer; border-radius: 4px; margin-left: 10px;';
+                    if (template.id === currentEditingId) {
+                        item.style.background = '#4b5563';
+                    }
+                    item.addEventListener('click', () => {
+                        currentEditingId = template.id;
+                        nameInput.value = template.name;
+                        folderInput.value = template.folder || '';
+                        contentInput.value = template.content;
+                        modal.querySelector('#delete-template').style.display = 'inline-block';
+                        renderTemplatesList();
+                    });
+                    details.appendChild(item);
+                });
+                container.appendChild(details);
+            });
+
+            const newButton = document.createElement('button');
+            newButton.textContent = '+ Новый шаблон';
+            newButton.style.cssText = 'width: 100%; margin-top: 10px; background: #3b82f6; border: none; padding: 8px; border-radius: 4px; cursor: pointer;';
+            newButton.addEventListener('click', () => {
+                clearFields();
+                renderTemplatesList();
+            });
+            container.appendChild(newButton);
+        };
+
+        modal.querySelector('#save-template').addEventListener('click', () => {
+            const name = nameInput.value.trim();
+            if (!name) {
+                showToast('Название шаблона не может быть пустым', 'error');
+                return;
+            }
+
+            const id = currentEditingId || 'template_' + Date.now();
+            templates[id] = {
+                id: id,
+                name: name,
+                folder: folderInput.value.trim(),
+                content: contentInput.value
+            };
+
+            saveTemplates();
+            showToast('Шаблон сохранен', 'success');
+            clearFields();
+            renderTemplatesList();
+        });
+
+        modal.querySelector('#delete-template').addEventListener('click', () => {
+            if (currentEditingId && templates[currentEditingId]) {
+                if (confirm(`Удалить шаблон "${templates[currentEditingId].name}"?`)) {
+                    delete templates[currentEditingId];
+                    saveTemplates();
+                    showToast('Шаблон удален', 'success');
+                    clearFields();
+                    renderTemplatesList();
+                }
+            }
+        });
+
+        modal.querySelector('#close-templates-modal').addEventListener('click', () => {
+            modal.style.display = 'none';
+            isTemplatesModalOpen = false;
+        });
+
+        renderTemplatesList();
+        clearFields();
+        isTemplatesModalOpen = true;
+    }
+
+    function openQuickTemplates() {
+        if (isQuickTemplatesOpen) {
+            const existingPopup = document.getElementById('quick-templates-popup');
+            if (existingPopup) existingPopup.remove();
+            isQuickTemplatesOpen = false;
+            return;
+        }
+
+        const button = document.getElementById('template-button');
+        if (!button) return;
+
+        const rect = button.getBoundingClientRect();
+        const popup = document.createElement('div');
+        popup.id = 'quick-templates-popup';
+        popup.style.cssText = `
+            position: fixed;
+            left: ${rect.left - 255}px;
+            top: ${rect.top}px;
+            width: 250px;
+            max-height: 400px;
+            z-index: 10001;
+            background: #2d3748;
+            border-radius: 8px;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.4);
+            display: flex;
+            flex-direction: column;
+            color: white;
+            font-family: 'Inter', sans-serif;
+        `;
+
+        const searchInput = document.createElement('input');
+        searchInput.type = 'text';
+        searchInput.placeholder = 'Поиск...';
+        searchInput.style.cssText = 'padding: 8px; margin: 8px; background: #1f2937; border: 1px solid #4b5563; border-radius: 4px; color: white;';
+
+        const listContainer = document.createElement('div');
+        listContainer.style.cssText = 'overflow-y: auto; padding: 0 8px 8px 8px;';
+
+        const renderList = (filter = '') => {
+            listContainer.innerHTML = '';
+            const filteredTemplates = Object.values(templates).filter(t => t.name.toLowerCase().includes(filter.toLowerCase()));
+
+            const folders = {};
+            filteredTemplates.forEach(t => {
+                const folderName = t.folder || 'Без папки';
+                if (!folders[folderName]) folders[folderName] = [];
+                folders[folderName].push(t);
+            });
+
+            Object.keys(folders).sort().forEach(folderName => {
+                const folderHeader = document.createElement('div');
+                folderHeader.textContent = folderName;
+                folderHeader.style.cssText = 'padding: 5px; color: #9ca3af; font-size: 12px; font-weight: bold;';
+                listContainer.appendChild(folderHeader);
+
+                folders[folderName].sort((a, b) => a.name.localeCompare(b.name)).forEach(template => {
+                    const item = document.createElement('div');
+                    item.textContent = template.name;
+                    item.style.cssText = 'padding: 8px; cursor: pointer; border-radius: 4px;';
+                    item.addEventListener('mouseenter', () => item.style.background = '#4a5568');
+                    item.addEventListener('mouseleave', () => item.style.background = 'none');
+                    item.addEventListener('click', () => {
+                        insertTextAtCursor(template.content);
+                        popup.remove();
+                        isQuickTemplatesOpen = false;
+                    });
+                    listContainer.appendChild(item);
+                });
+            });
+        };
+
+        searchInput.addEventListener('input', () => renderList(searchInput.value));
+
+        const manageButton = document.createElement('button');
+        manageButton.textContent = '⚙️ Управление';
+        manageButton.style.cssText = 'padding: 8px; background: #4a5568; border: none; color: white; cursor: pointer; border-top: 1px solid #4b5563;';
+        manageButton.addEventListener('click', () => {
+            openTemplatesModal();
+            popup.remove();
+            isQuickTemplatesOpen = false;
+        });
+
+        popup.appendChild(searchInput);
+        popup.appendChild(listContainer);
+        popup.appendChild(manageButton);
+        document.body.appendChild(popup);
+        renderList();
+        isQuickTemplatesOpen = true;
+
+        document.addEventListener('click', function closePopup(event) {
+            if (!popup.contains(event.target) && event.target !== button) {
+                popup.remove();
+                isQuickTemplatesOpen = false;
+                document.removeEventListener('click', closePopup);
+            }
+        });
+    }
+
+    function createTemplateButton() {
+        const existingButton = document.getElementById('template-button');
+        if (existingButton) return;
+
+        const targetContainer = document.querySelector('.flex.items-center.justify-center');
+        if (!targetContainer) {
+            setTimeout(createTemplateButton, 500);
+            return;
+        }
+
+        const button = document.createElement('button');
+        button.id = 'template-button';
+        button.innerHTML = '📜';
+        button.title = 'Шаблоны (Ctrl+Shift+T)';
+        button.style.cssText = `
+            background: #4a5568; color: white; border: none; width: 36px; height: 36px;
+            border-radius: 50%; font-size: 18px; cursor: pointer; margin-left: 8px;
+            display: flex; align-items: center; justify-content: center;
+        `;
+        button.addEventListener('click', openQuickTemplates);
+        targetContainer.appendChild(button);
+    }
+
     function applyStyles() {
         if (!isChatPage()) {
             if (styleElement) styleElement.textContent = '';
@@ -1857,6 +2168,10 @@ compactMode ? '14px' : '20px'}; border-bottom:1px solid rgba(255,255,255,0.15); 
                     togglePanel();
                 }
             }
+            if (e.ctrlKey && e.shiftKey && e.key === 'T') {
+                e.preventDefault();
+                openQuickTemplates();
+            }
         });
     }
 
@@ -1864,10 +2179,12 @@ compactMode ? '14px' : '20px'}; border-bottom:1px solid rgba(255,255,255,0.15); 
         loadProfiles();
         loadFavoriteFonts();
         loadModalPositions();
+        loadTemplates();
 
         compactMode = GM_getValue('spicychat_compact_mode', false);
 
         createButtons();
+        createTemplateButton();
         applyStyles();
         setupHotkeys();
 
@@ -1876,6 +2193,7 @@ compactMode ? '14px' : '20px'}; border-bottom:1px solid rgba(255,255,255,0.15); 
                 lastUrl = window.location.href;
                 if (isChatPage()) {
                     if(!document.getElementById('spicychat-editor-button')) createButtons();
+                    createTemplateButton();
                     applyStyles();
                 }
                 else {
