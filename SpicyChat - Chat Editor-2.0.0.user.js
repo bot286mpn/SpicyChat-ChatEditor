@@ -164,9 +164,6 @@
             from { transform: translateX(0); opacity: 1; }
             to { transform: translateX(400px); opacity: 0; }
         }
-    .templates-popup-folder-container:hover > .templates-popup-submenu {
-        display: block !important;
-    }
     `);
 
     // === MODAL DRAGGABLE ===
@@ -1929,7 +1926,21 @@
         }
         popup = document.createElement('div');
         popup.id = 'templates-popup';
-        popup.style.cssText = `position: absolute; bottom: 50px; right: 10px; width: 250px; max-height: 300px; overflow-y: auto; background: #2d3748; border: 1px solid #4a5568; border-radius: 8px; z-index: 10001; box-shadow: 0 10px 30px rgba(0,0,0,0.4);`;
+        popup.style.cssText = `
+            position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            width: 280px; max-height: 400px; display: flex; flex-direction: column;
+            background: #1f2937; border: 1px solid #4a5568; border-radius: 8px;
+            z-index: 10001; box-shadow: 0 10px 30px rgba(0,0,0,0.4); font-family: 'Inter', sans-serif;
+        `;
+
+        popup.innerHTML = `
+            <div id="templates-popup-header" style="padding: 8px 12px; background: #374151; color: white; font-weight: bold; border-bottom: 1px solid #4a5568; cursor: move; border-radius: 8px 8px 0 0;">
+                Быстрые ответы
+            </div>
+            <div id="templates-popup-content" style="overflow-y: auto; flex: 1;"></div>
+        `;
+
+        const contentContainer = popup.querySelector('#templates-popup-content');
 
         const createItem = (node, isSubmenu = false) => {
             const item = document.createElement('div');
@@ -1963,14 +1974,12 @@
                 });
             } else if (node.type === 'folder') {
                 item.textContent = `📁 ${node.title} ▸`;
-                item.classList.add('templates-popup-folder-container');
                 item.style.position = 'relative';
 
                 const submenu = document.createElement('div');
-                submenu.classList.add('templates-popup-submenu');
                 submenu.style.cssText = `
-                    display: none; position: absolute; left: 100%; top: -1px; width: 250px;
-                    background: #2d3748; border: 1px solid #4a5568; border-radius: 8px;
+                    display: none; position: absolute; width: 250px;
+                    background: #1f2937; border: 1px solid #4a5568; border-radius: 8px;
                     z-index: 10002; box-shadow: 5px 5px 15px rgba(0,0,0,0.3);
                 `;
 
@@ -1980,6 +1989,30 @@
                     submenu.innerHTML = `<div style="padding: 10px 12px; color: #6b7280; font-size: 12px;">Пусто</div>`;
                 }
                 item.appendChild(submenu);
+
+                item.addEventListener('mouseenter', () => {
+                    submenu.style.display = 'block';
+                    const rect = item.getBoundingClientRect();
+                    const subRect = submenu.getBoundingClientRect();
+
+                    let top = rect.top;
+                    let left = rect.right;
+
+                    if (left + subRect.width > window.innerWidth) {
+                        left = rect.left - subRect.width;
+                    }
+                    if (top + subRect.height > window.innerHeight) {
+                        top = window.innerHeight - subRect.height;
+                    }
+
+                    submenu.style.position = 'fixed';
+                    submenu.style.top = `${top}px`;
+                    submenu.style.left = `${left}px`;
+                });
+
+                item.addEventListener('mouseleave', () => {
+                    submenu.style.display = 'none';
+                });
             }
             return item;
         };
@@ -2001,21 +2034,24 @@
                     sectionWrapper.appendChild(createItem(node));
                 });
             }
-            popup.appendChild(sectionWrapper);
+            contentContainer.appendChild(sectionWrapper);
         };
 
         const profileTemplates = (currentProfileName !== 'Профиль не выбран' && currentSettings.templates) ? currentSettings.templates : [];
 
         if (globalTemplates.length === 0 && profileTemplates.length === 0) {
-             popup.innerHTML = `<div style="padding: 12px; text-align: center; color: #9ca3af; font-size: 13px;">Нет шаблонов.</div>`;
+            contentContainer.innerHTML = `<div style="padding: 12px; text-align: center; color: #9ca3af; font-size: 13px;">Нет шаблонов.</div>`;
         } else {
             addSection('🌐 Общие', globalTemplates);
             if (currentProfileName !== 'Профиль не выбран') {
-                 addSection(`👤 ${currentProfileName}`, profileTemplates);
+                addSection(`👤 ${currentProfileName}`, profileTemplates);
             }
         }
 
         document.body.appendChild(popup);
+        applyModalPosition(popup);
+        makeDraggable(popup, popup.querySelector('#templates-popup-header'));
+
         const closePopup = (e) => {
             if (!popup.contains(e.target) && e.target.id !== 'templates-access-btn') {
                 popup.remove();
@@ -2384,9 +2420,9 @@
         }
 
         let botColor = '#1f2937'; let userColor = '#2563eb';
-        const botMsgSample = document.querySelector('div.w-full.flex.mb-lg:not(.flex-row-reverse) .bg-gray-3');
+        const botMsgSample = document.querySelector('div[class*="w-full flex mb-lg"]:not(.flex-row-reverse) .bg-gray-3');
         if (botMsgSample) botColor = window.getComputedStyle(botMsgSample).backgroundColor;
-        const userMsgSample = document.querySelector('div.w-full.flex.mb-lg.flex-row-reverse .bg-accent-blue');
+        const userMsgSample = document.querySelector('div[class*="w-full flex mb-lg"].flex-row-reverse .bg-accent-blue');
         if (userMsgSample) userColor = window.getComputedStyle(userMsgSample).backgroundColor;
 
         let html = `<!DOCTYPE html><html lang="ru"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>SpicyChat Export</title><script src="https://cdn.tailwindcss.com"></script><style>body{font-family:'Inter',system-ui,sans-serif;background:#0f111a;color:#e5e7eb;padding:20px;margin:0;min-height:100vh;display:flex;flex-direction:column;align-items:center}.main-wrapper{width:100%;max-width:900px;margin:0 auto}.chat-container{display:flex;flex-direction:column;gap:20px;margin-top:40px}.message{display:flex;gap:15px;align-items:flex-start}.message.user{flex-direction:row-reverse}.avatar{width:40px;height:40px;border-radius:50%;object-fit:cover;background:#374151;flex-shrink:0}.content{max-width:80%}.name{font-weight:600;margin-bottom:4px;font-size:0.9em;color:#d1d5db}.message.user .name{text-align:right;display:none}.bubble{padding:12px 16px;border-radius:8px;line-height:1.6;position:relative;white-space:pre-wrap;font-size:15px}.message:not(.user) .bubble{background-color:${botColor};color:#d1d5db;border-top-left-radius:2px}.message.user .bubble{background-color:${userColor};color:white;border-top-right-radius:2px}a{color:#60a5fa;text-decoration:none}em{font-style:italic;opacity:0.9}</style></head><body><div class="main-wrapper"><div class="chat-header">${headerHTML}</div><div class="chat-container">`;
@@ -2401,10 +2437,10 @@
                 let cleanText = "";
                 if (contentDiv) {
                     const clone = contentDiv.cloneNode(true); clone.querySelectorAll('.text-xs, button, svg, .absolute').forEach(el => el.remove());
-                    cleanText = clone.innerText.trim().replace(/\s*\d+\s*\/\s*\d+\s*$/, '');
-                } else { cleanText = msg.innerText.trim(); }
+                    cleanText = clone.innerHTML.trim().replace(/\s*\d+\s*\/\s*\d+\s*$/, '');
+                } else { cleanText = msg.innerHTML.trim(); }
 
-                if (cleanText) { html += `<div class="message ${isUser ? 'user' : ''}"><img src="${avatarSrc}" class="avatar" alt="${name}"><div class="content"><div class="bubble">${cleanText.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div></div></div>`; }
+                if (cleanText) { html += `<div class="message ${isUser ? 'user' : ''}"><img src="${avatarSrc}" class="avatar" alt="${name}"><div class="content"><div class="bubble">${cleanText}</div></div></div>`; }
             } catch (e) { console.error(e); }
         });
         html += `</div></div></body></html>`; return html;
