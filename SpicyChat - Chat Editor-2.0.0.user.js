@@ -36,6 +36,8 @@
     let globalTemplates = [];
     let compactMode = false;
     let modalPositions = {};
+    let openFolders = {};
+    let characterProfileMap = {};
 
     // Шрифты
     let systemFonts = [];
@@ -375,6 +377,51 @@
     }
 
     // === ШАБЛОНЫ / БЫСТРЫЕ ОТВЕТЫ ===
+    function saveCharacterProfileMap() {
+        GM_setValue('spicychat_char_profiles', JSON.stringify(characterProfileMap));
+    }
+
+    function loadCharacterProfileMap() {
+        const saved = GM_getValue('spicychat_char_profiles', null);
+        if (saved) {
+            characterProfileMap = JSON.parse(saved);
+        }
+    }
+
+    function generateId() {
+        return '_' + Math.random().toString(36).substr(2, 9);
+    }
+
+    function runTemplateStructureMigration() {
+        const migrationDone = GM_getValue('spicychat_template_migration_v3', false);
+        if (migrationDone) return;
+
+        const convertArray = (arr) => {
+            if (!arr || !Array.isArray(arr)) return [];
+            if (arr.length > 0 && arr[0].type) return arr;
+
+            return arr.map(item => ({
+                id: generateId(),
+                type: 'template',
+                title: item.title,
+                content: item.content
+            }));
+        };
+
+        globalTemplates = convertArray(globalTemplates);
+        saveGlobalTemplates();
+
+        Object.keys(profiles).forEach(profileName => {
+            if (profiles[profileName].templates) {
+                profiles[profileName].templates = convertArray(profiles[profileName].templates);
+            }
+        });
+        saveProfiles();
+
+        GM_setValue('spicychat_template_migration_v3', true);
+        console.log("SpicyChat Editor: Migrated templates to new folder-ready structure.");
+    }
+
     function saveGlobalTemplates() {
         GM_setValue('spicychat_global_templates', JSON.stringify(globalTemplates));
     }
@@ -1292,8 +1339,16 @@
                 </div>
 
                 <div style="display: flex; flex: 1; overflow: hidden; min-height: 500px;">
-                    <div id="templates-list-container" style="width: 40%; border-right: 1px solid rgba(255,255,255,0.1); display: flex; flex-direction: column; background: #111827; overflow-y: auto;">
-                        <!-- Template list will be rendered here -->
+                    <div style="width: 40%; border-right: 1px solid rgba(255,255,255,0.1); display: flex; flex-direction: column; background: #111827;">
+
+                        <div style="padding: 8px; border-bottom: 1px solid rgba(255,255,255,0.1); display:flex; gap: 8px;">
+                            <input type="text" id="template-search-input" placeholder="🔍 Поиск..." style="width: 100%; padding: 6px; background: #374151; color: white; border: 1px solid #4b5563; border-radius: 4px; font-size: 12px;">
+                            <button id="add-folder-btn" title="Создать папку" style="padding: 6px 10px; background: #4b5563; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight:600;">📁+</button>
+                        </div>
+
+                        <div id="templates-list-container" style="flex: 1; overflow-y: auto;">
+                            <!-- Template list will be rendered here -->
+                        </div>
                     </div>
 
                     <div style="width: 60%; padding: 16px; display: flex; flex-direction: column; gap: 12px;">
@@ -1325,64 +1380,158 @@
         modal.querySelector('#save-template-btn').addEventListener('click', saveTemplate);
         modal.querySelector('#clear-template-form-btn').addEventListener('click', clearTemplateForm);
 
+        modal.querySelector('#template-search-input').addEventListener('input', (e) => {
+            renderTemplatesList(e.target.value);
+        });
+        modal.querySelector('#add-folder-btn').addEventListener('click', createNewFolder);
+
         renderTemplatesList();
     }
 
-    function renderTemplatesList() {
+    function createNewFolder() {
+        const folderName = prompt("Введите название папки:");
+        if (folderName && folderName.trim() !== '') {
+            const newFolder = {
+                id: generateId(),
+                type: 'folder',
+                title: folderName.trim(),
+                children: []
+            };
+            globalTemplates.push(newFolder); // Add to global templates by default for now
+            saveGlobalTemplates();
+            renderTemplatesList();
+            showToast(`Папка "${folderName}" создана`, 'success');
+        }
+    }
+
+
+    function findItemPath(nodes, id, currentPath = []) {
+        for (const node of nodes) {
+            const newPath = [...currentPath, node];
+            if (node.id === id) {
+                return newPath;
+            }
+            if (node.type === 'folder' && node.children) {
+                const foundPath = findItemPath(node.children, id, newPath);
+                if (foundPath) {
+                    return foundPath;
+                }
+            }
+        }
+        return null;
+    }
+
+
+    function renderTemplatesList(searchQuery = '') {
         const container = document.getElementById('templates-list-container');
         if (!container) return;
         container.innerHTML = '';
+        const lowerCaseQuery = searchQuery.toLowerCase().trim();
 
-        const renderList = (title, templates, type) => {
-            container.innerHTML += `<h5 style="padding: 10px 12px 5px; margin: 5px 0 0; color: #9ca3af; font-size: 11px; font-weight: 600; text-transform: uppercase;">${title}</h5>`;
-            if (templates.length === 0) {
-                container.innerHTML += `<div style="padding: 10px 12px; color: #6b7280; font-size: 12px;">Пусто</div>`;
-                return;
+        const filterNodes = (nodes) => {
+            if (!lowerCaseQuery) return nodes;
+
+            const filtered = [];
+            for (const node of nodes) {
+                if (node.type === 'template') {
+                    if (node.title.toLowerCase().includes(lowerCaseQuery) || node.content.toLowerCase().includes(lowerCaseQuery)) {
+                        filtered.push(node);
+                    }
+                } else if (node.type === 'folder') {
+                    const filteredChildren = filterNodes(node.children || []);
+                    if (filteredChildren.length > 0 || node.title.toLowerCase().includes(lowerCaseQuery)) {
+                        filtered.push({ ...node, children: filteredChildren });
+                    }
+                }
             }
+            return filtered;
+        };
 
-            templates.forEach((template, index) => {
-                const item = document.createElement('div');
-                item.style.cssText = `
-                    padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,0.05);
-                    display: flex; justify-content: space-between; align-items: center; cursor: pointer;
-                `;
+
+        const renderNode = (node, parentContainer, type, level = 0) => {
+            const item = document.createElement('div');
+            item.style.marginLeft = `${level * 15}px`;
+
+            if (node.type === 'folder') {
+                const isOpen = openFolders[node.id] || !!searchQuery;
+                item.style.cssText = `padding: 10px 12px; background: #1a202c; border-top: 1px solid #374151; font-weight: bold; cursor: pointer; color: #a0aec0; display: flex; justify-content: space-between; align-items: center; margin-left: ${level * 15}px;`;
                 item.innerHTML = `
-                    <div style="color: white; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${template.title}">${template.title}</div>
+                    <div>${isOpen ? '📂' : '📁'} ${node.title}</div>
                     <div style="display:flex; gap: 5px;">
-                        <button class="delete-template-btn" data-index="${index}" data-type="${type}" title="Удалить" style="background: #ef4444; border:none; color:white; border-radius:4px; width:22px; height:22px; font-size:12px;">🗑️</button>
+                        <button class="delete-template-btn" title="Удалить папку" style="background: #ef4444; border:none; color:white; border-radius:4px; width:22px; height:22px; font-size:12px;">🗑️</button>
                     </div>
                 `;
                 item.addEventListener('click', (e) => {
                     if (e.target.classList.contains('delete-template-btn')) return;
-                    editTemplate(index, type);
+                    openFolders[node.id] = !isOpen;
+                    renderTemplatesList(searchQuery);
                 });
-                item.querySelector('.delete-template-btn').addEventListener('click', () => deleteTemplate(index, type));
-                container.appendChild(item);
-            });
+                item.querySelector('.delete-template-btn').addEventListener('click', () => deleteTemplate(node.id, type));
+
+                parentContainer.appendChild(item);
+
+                if (isOpen && node.children) {
+                    const childrenContainer = document.createElement('div');
+                    node.children.forEach(child => renderNode(child, childrenContainer, type, level + 1));
+                    parentContainer.appendChild(childrenContainer);
+                }
+            } else { // template
+                item.style.cssText = `padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,0.05); display: flex; justify-content: space-between; align-items: center; cursor: pointer; margin-left: ${level * 15}px;`;
+                item.innerHTML = `
+                    <div style="color: white; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${node.title}">📝 ${node.title}</div>
+                    <div style="display:flex; gap: 5px;">
+                        <button class="delete-template-btn" title="Удалить" style="background: #ef4444; border:none; color:white; border-radius:4px; width:22px; height:22px; font-size:12px;">🗑️</button>
+                    </div>
+                `;
+                item.addEventListener('click', (e) => {
+                    if (e.target.classList.contains('delete-template-btn')) return;
+                    editTemplate(node.id, type);
+                });
+                item.querySelector('.delete-template-btn').addEventListener('click', () => deleteTemplate(node.id, type));
+                parentContainer.appendChild(item);
+            }
         };
 
-        renderList('🌐 Общие', globalTemplates, 'global');
+        const renderSection = (title, templates, type) => {
+            const sectionWrapper = document.createElement('div');
+            const titleEl = document.createElement('h5');
+            titleEl.style.cssText = `padding: 10px 12px 5px; margin: 5px 0 0; color: #9ca3af; font-size: 11px; font-weight: 600; text-transform: uppercase;`;
+            titleEl.textContent = title;
+            sectionWrapper.appendChild(titleEl);
+
+            const filteredTemplates = filterNodes(templates);
+
+            if (filteredTemplates.length === 0) {
+                const emptyEl = document.createElement('div');
+                emptyEl.style.cssText = `padding: 10px 12px; color: #6b7280; font-size: 12px;`;
+                emptyEl.textContent = 'Пусто';
+                sectionWrapper.appendChild(emptyEl);
+            } else {
+                filteredTemplates.forEach(node => renderNode(node, sectionWrapper, type));
+            }
+            return sectionWrapper;
+        };
+
+        container.appendChild(renderSection('🌐 Общие', globalTemplates, 'global'));
 
         const profileName = currentProfileName !== 'Профиль не выбран' ? `👤 ${currentProfileName}` : '👤 Профиль не выбран';
         const profileTemplates = (currentProfileName !== 'Профиль не выбран' && currentSettings.templates) ? currentSettings.templates : [];
-        const profileContainer = document.createElement('div');
+        const profileSection = renderSection(profileName, profileTemplates, 'profile');
         if (currentProfileName === 'Профиль не выбран') {
-            profileContainer.style.opacity = '0.5';
+            profileSection.style.opacity = '0.5';
         }
-        renderList(profileName, profileTemplates, 'profile');
+        container.appendChild(profileSection);
     }
 
     function saveTemplate() {
         const titleInput = document.getElementById('template-title-input');
         const contentInput = document.getElementById('template-content-input');
-        const indexInput = document.getElementById('template-edit-index');
-        const typeInput = document.getElementById('template-edit-type');
+        const idInput = document.getElementById('template-edit-index'); // Reusing this for ID
         const isProfileSpecificCheckbox = document.getElementById('template-is-profile-specific');
 
         const title = titleInput.value.trim();
         const content = contentInput.value.trim();
-        const index = parseInt(indexInput.value);
-        const type = typeInput.value;
+        const id = idInput.value;
         const isProfileSpecific = isProfileSpecificCheckbox.checked;
 
         if (!title || !content) {
@@ -1395,9 +1544,9 @@
             return;
         }
 
-        const newTemplate = { title, content };
+        const newTemplate = { id: id !== '-1' ? id : generateId(), type: 'template', title, content };
 
-        if (index === -1) { // Создание нового
+        if (id === '-1') { // Creating new
             if (isProfileSpecific) {
                 currentSettings.templates.push(newTemplate);
                 saveProfiles();
@@ -1407,66 +1556,94 @@
                 saveGlobalTemplates();
                 showToast('Общий шаблон добавлен', 'success');
             }
-        } else { // Редактирование существующего
-            const targetArray = type === 'profile' ? currentSettings.templates : globalTemplates;
-            targetArray[index] = newTemplate;
+        } else { // Editing existing
+            const path = findItemPath(globalTemplates, id) || (currentSettings.templates ? findItemPath(currentSettings.templates, id) : null);
+            if (path) {
+                const itemToUpdate = path[path.length - 1];
+                itemToUpdate.title = title;
+                itemToUpdate.content = content;
 
-            if (type === 'profile') {
-                saveProfiles();
-            } else {
-                saveGlobalTemplates();
+                const type = findItemPath(globalTemplates, id) ? 'global' : 'profile';
+                if (type === 'profile') {
+                    saveProfiles();
+                } else {
+                    saveGlobalTemplates();
+                }
+                showToast('Шаблон обновлен', 'success');
             }
-            showToast('Шаблон обновлен', 'success');
         }
 
-        renderTemplatesList();
+        renderTemplatesList(document.getElementById('template-search-input').value);
         clearTemplateForm();
-        const popup = document.getElementById('templates-popup');
-        if (popup) popup.remove();
     }
 
-    function editTemplate(index, type) {
-        const checkbox = document.getElementById('template-is-profile-specific');
-        const targetArray = type === 'profile' ? currentSettings.templates : globalTemplates;
-        const template = targetArray[index];
+    function editTemplate(id, type) {
+        const allTemplates = type === 'global' ? globalTemplates : currentSettings.templates;
+        const path = findItemPath(allTemplates, id);
+        if (!path) return;
+        const template = path[path.length - 1];
 
-        if (!template) return;
+        if (!template || template.type !== 'template') return;
 
         document.getElementById('template-editor-title').textContent = 'Редактирование';
-        document.getElementById('template-edit-index').value = index;
-        document.getElementById('template-edit-type').value = type;
+        document.getElementById('template-edit-index').value = id; // Use this to store ID
         document.getElementById('template-title-input').value = template.title;
         document.getElementById('template-content-input').value = template.content;
 
+        const checkbox = document.getElementById('template-is-profile-specific');
         checkbox.checked = type === 'profile';
-        checkbox.disabled = true; // Запрещаем менять тип при редактировании
+        checkbox.disabled = true;
     }
 
-    function deleteTemplate(index, type) {
+    function deleteTemplate(id, type) {
         const targetArray = type === 'profile' ? currentSettings.templates : globalTemplates;
-        if (!targetArray || !targetArray[index]) return;
 
-        if (confirm(`Удалить шаблон "${targetArray[index].title}"?`)) {
-            targetArray.splice(index, 1);
+        let parent = null;
+        let itemIndex = -1;
 
-            if (type === 'profile') {
-                saveProfiles();
-            } else {
-                saveGlobalTemplates();
+        const findAndRemove = (nodes, parentNode) => {
+            for (let i = 0; i < nodes.length; i++) {
+                if (nodes[i].id === id) {
+                    parent = parentNode;
+                    itemIndex = i;
+                    return nodes[i];
+                }
+                if (nodes[i].type === 'folder' && nodes[i].children) {
+                    const found = findAndRemove(nodes[i].children, nodes[i]);
+                    if (found) return found;
+                }
             }
+            return null;
+        };
 
-            renderTemplatesList();
-            clearTemplateForm();
-            showToast('Шаблон удален', 'success');
-            const popup = document.getElementById('templates-popup');
-            if (popup) popup.remove();
+        const itemToDelete = findAndRemove(targetArray, null);
+
+        if (itemToDelete) {
+            const listToRemoveFrom = parent ? parent.children : targetArray;
+            const confirmMessage = itemToDelete.type === 'folder'
+                ? `Удалить папку "${itemToDelete.title}" и всё её содержимое?`
+                : `Удалить шаблон "${itemToDelete.title}"?`;
+
+            if (confirm(confirmMessage)) {
+                listToRemoveFrom.splice(itemIndex, 1);
+
+                if (type === 'profile') {
+                    saveProfiles();
+                } else {
+                    saveGlobalTemplates();
+                }
+
+                renderTemplatesList(document.getElementById('template-search-input').value);
+                clearTemplateForm();
+                showToast('Элемент удален', 'success');
+            }
         }
     }
+
 
     function clearTemplateForm() {
         document.getElementById('template-editor-title').textContent = 'Новый шаблон';
         document.getElementById('template-edit-index').value = -1;
-        document.getElementById('template-edit-type').value = 'global';
         document.getElementById('template-title-input').value = '';
         document.getElementById('template-content-input').value = '';
         const checkbox = document.getElementById('template-is-profile-specific');
@@ -1512,22 +1689,7 @@
             toggleTemplatesPopup(button);
         });
 
-        const saveButton = document.createElement('button');
-        saveButton.id = 'quick-save-template-btn';
-        saveButton.innerHTML = '💾';
-        saveButton.title = 'Сохранить как шаблон';
-        saveButton.style.cssText = `background: #10b981; color: white; border: none; border-radius: 5px; width: 36px; height: 36px; cursor: pointer; font-size: 16px; margin-left: 5px;`;
-        saveButton.addEventListener('mousedown', (e) => {
-             e.preventDefault();
-             e.stopPropagation();
-             const textarea = document.querySelector('textarea[placeholder*="Напишите сообщение"]');
-             if (textarea) {
-                openQuickSaveModal(textarea.value);
-             }
-        });
-
         inputContainer.appendChild(button);
-        inputContainer.appendChild(saveButton);
     }
 
     function toggleTemplatesPopup(button) {
@@ -1540,32 +1702,51 @@
         popup.id = 'templates-popup';
         popup.style.cssText = `position: absolute; bottom: 50px; right: 10px; width: 250px; max-height: 300px; overflow-y: auto; background: #2d3748; border: 1px solid #4a5568; border-radius: 8px; z-index: 10001; box-shadow: 0 10px 30px rgba(0,0,0,0.4);`;
 
-        const createTemplateItem = (template) => {
+        const createItem = (node, level = 0) => {
             const item = document.createElement('div');
-            item.textContent = template.title;
-            item.title = template.content;
-            item.style.cssText = `padding: 10px 12px; color: white; font-size: 13px; cursor: pointer; border-bottom: 1px solid #4a5568;`;
-            item.addEventListener('mouseenter', () => item.style.backgroundColor = '#4a5568');
-            item.addEventListener('mouseleave', () => item.style.backgroundColor = 'transparent');
-            item.addEventListener('click', () => {
-                const textarea = document.querySelector('textarea[placeholder*="Напишите сообщение"]');
-                if (textarea) {
-                    textarea.value += template.content;
-                    textarea.dispatchEvent(new Event('input', { bubbles: true }));
-                    textarea.focus();
-                }
-                popup.remove();
-            });
-            return item;
+            const paddingLeft = 12 + level * 15;
+            if (node.type === 'template') {
+                item.textContent = node.title;
+                item.title = node.content;
+                item.style.cssText = `padding: 10px 12px 10px ${paddingLeft}px; color: white; font-size: 13px; cursor: pointer; border-bottom: 1px solid #4a5568;`;
+                item.addEventListener('mouseenter', () => item.style.backgroundColor = '#4a5568');
+                item.addEventListener('mouseleave', () => item.style.backgroundColor = 'transparent');
+                item.addEventListener('click', () => {
+                    const textarea = document.querySelector('textarea[placeholder*="Напишите сообщение"]');
+                    if (textarea) {
+                        textarea.value += node.content;
+                        textarea.dispatchEvent(new Event('input', { bubbles: true }));
+                        textarea.focus();
+                    }
+                    popup.remove();
+                });
+                return [item];
+            } else if (node.type === 'folder') {
+                const folderItem = document.createElement('div');
+                folderItem.textContent = `📁 ${node.title}`;
+                folderItem.style.cssText = `padding: 8px 12px 8px ${paddingLeft}px; color: #9ca3af; font-size: 12px; font-weight: bold; background: #1f2937;`;
+                const childrenItems = (node.children || []).flatMap(child => createItem(child, level + 1));
+                return [folderItem, ...childrenItems];
+            }
+            return [];
         };
 
         const addSection = (title, templates) => {
-            popup.innerHTML += `<h5 style="padding: 8px 12px 4px; margin: 0; color: #9ca3af; font-size: 11px; font-weight: 600; text-transform: uppercase; background: #1f2937;">${title}</h5>`;
+            const sectionWrapper = document.createElement('div');
+            const titleEl = document.createElement('h5');
+            titleEl.style.cssText = `padding: 8px 12px 4px; margin: 0; color: #9ca3af; font-size: 11px; font-weight: 600; text-transform: uppercase; background: #1f2937; position: sticky; top: 0;`;
+            titleEl.textContent = title;
+            sectionWrapper.appendChild(titleEl);
+
             if (templates.length === 0) {
-                popup.innerHTML += `<div style="padding: 10px 12px; color: #6b7280; font-size: 12px;">Пусто</div>`;
+                const emptyEl = document.createElement('div');
+                emptyEl.style.cssText = `padding: 10px 12px; color: #6b7280; font-size: 12px;`;
+                emptyEl.textContent = 'Пусто';
+                sectionWrapper.appendChild(emptyEl);
             } else {
-                templates.forEach(template => popup.appendChild(createTemplateItem(template)));
+                templates.flatMap(node => createItem(node)).forEach(item => sectionWrapper.appendChild(item));
             }
+            popup.appendChild(sectionWrapper);
         };
 
         const profileTemplates = (currentProfileName !== 'Профиль не выбран' && currentSettings.templates) ? currentSettings.templates : [];
@@ -2134,6 +2315,22 @@ compactMode ? '14px' : '20px'}; border-bottom:1px solid rgba(255,255,255,0.15); 
             }
         });
 
+        panel.querySelector('#btn-bind-profile').addEventListener('click', () => {
+            const charId = getCharacterId();
+            if (!charId) {
+                showToast('Персонаж не найден', 'error');
+                return;
+            }
+            if (currentProfileName === 'Профиль не выбран') {
+                delete characterProfileMap[charId];
+                showToast('Привязка к профилю снята', 'info');
+            } else {
+                characterProfileMap[charId] = currentProfileName;
+                showToast(`Профиль "${currentProfileName}" привязан к этому персонажу`, 'success');
+            }
+            saveCharacterProfileMap();
+        });
+
         panel.querySelector('#btn-duplicate-profile').addEventListener('click', () => {
             if (currentProfileName === 'Профиль не выбран') {
                 showToast('Выберите профиль для дублирования', 'error');
@@ -2315,18 +2512,41 @@ compactMode ? '14px' : '20px'}; border-bottom:1px solid rgba(255,255,255,0.15); 
         });
     }
 
+    function getCharacterId() {
+        const match = window.location.href.match(/chat\/character\/([a-f0-9-]+)/);
+        return match ? match[1] : null;
+    }
+
+    function switchProfileForCharacter() {
+        const charId = getCharacterId();
+        if (charId && characterProfileMap[charId]) {
+            const profileName = characterProfileMap[charId];
+            if (profiles[profileName] && currentProfileName !== profileName) {
+                currentProfileName = profileName;
+                currentSettings = { ...profiles[profileName] };
+                saveProfiles();
+                applyStyles();
+                updatePanelUI();
+                showToast(`Профиль "${profileName}" применен`, 'info');
+            }
+        }
+    }
+
     function init() {
         runTemplateMigration();
         loadProfiles();
         loadFavoriteFonts();
         loadGlobalTemplates();
+        runTemplateStructureMigration();
         loadModalPositions();
+        loadCharacterProfileMap();
 
         compactMode = GM_getValue('spicychat_compact_mode', false);
 
         if (isChatPage()) {
             createButtons();
             createTemplatesAccessButton();
+            switchProfileForCharacter();
         }
         applyStyles();
         setupHotkeys();
@@ -2336,6 +2556,7 @@ compactMode ? '14px' : '20px'}; border-bottom:1px solid rgba(255,255,255,0.15); 
                 lastUrl = window.location.href;
                 if (isChatPage()) {
                     if(!document.getElementById('spicychat-editor-button')) createButtons();
+                    switchProfileForCharacter();
                     applyStyles();
                     createTemplatesAccessButton();
                 } else {
