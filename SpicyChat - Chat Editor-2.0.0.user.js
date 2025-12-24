@@ -1517,7 +1517,9 @@
         saveButton.innerHTML = '💾';
         saveButton.title = 'Сохранить как шаблон';
         saveButton.style.cssText = `background: #10b981; color: white; border: none; border-radius: 5px; width: 36px; height: 36px; cursor: pointer; font-size: 16px; margin-left: 5px;`;
-        saveButton.addEventListener('click', () => {
+        saveButton.addEventListener('click', (e) => {
+             e.preventDefault();
+             e.stopPropagation();
              const textarea = document.querySelector('textarea[placeholder*="Напишите сообщение"]');
              if (textarea) {
                 openQuickSaveModal(textarea.value);
